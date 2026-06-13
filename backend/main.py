@@ -93,7 +93,15 @@ async def _broadcast(data: dict) -> None:
 def _on_transcript_segment(seg: TranscriptSegment) -> None:
     """Called from transcriber worker thread — schedule broadcast on event loop."""
     if active_session:
-        active_session.segments.append(seg)
+        # Partials and the final of one utterance share an id; upsert so the persisted
+        # transcript (and the Claude context) holds one clean entry per utterance, not
+        # every interim partial. The latest write (the final) wins.
+        for i, existing in enumerate(active_session.segments):
+            if existing.id == seg.id:
+                active_session.segments[i] = seg
+                break
+        else:
+            active_session.segments.append(seg)
     if event_loop is None:
         return
     # Worker runs off-loop; hand the coroutine to the captured loop thread-safely.
