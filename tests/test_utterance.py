@@ -44,6 +44,8 @@ def test_silence_gap_finalizes_one_segment():
     seg = rec.segments[0]
     assert seg.is_final is True
     assert seg.text == "hello world."
+    assert seg.speaker == "You"          # mic_rms (0.9) >= lb_rms (0.1) at onset
+    assert seg.session_id == "s1"
 
 
 def test_silence_below_threshold_does_not_finalize():

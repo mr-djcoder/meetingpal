@@ -10,7 +10,7 @@ import numpy as np
 from backend.models import TranscriptSegment
 
 SAMPLE_RATE = 16000
-SENTENCE_END = (".", "?", "!")
+SENTENCE_END: frozenset[str] = frozenset({".", "?", "!"})
 
 TranscribeFn = Callable[[np.ndarray, int], str]
 EmitFn = Callable[[TranscriptSegment], None]
@@ -48,7 +48,7 @@ class UtteranceAssembler:
         self._partial_beam = partial_beam
         self._final_beam = final_beam
 
-        self._buffer = np.empty(0, dtype=np.float32)
+        self._chunks: list[np.ndarray] = []
         self._current_id: str | None = None
         self._speaker: Literal["You", "Them"] = "You"
         self._silence_run_s = 0.0
@@ -72,11 +72,11 @@ class UtteranceAssembler:
         if is_speech:
             if self._current_id is None:
                 self._start_utterance(mic_rms, lb_rms)
-            self._buffer = np.concatenate([self._buffer, frame])
+            self._chunks.append(frame)
             self._silence_run_s = 0.0
             self._audio_since_partial_s += frame_s
 
-            if len(self._buffer) / SAMPLE_RATE >= self._max_utterance_s:
+            if self._buffered_s() >= self._max_utterance_s:
                 self._finalize()
                 return
 
@@ -94,20 +94,25 @@ class UtteranceAssembler:
                     self._finalize()
 
     def flush(self) -> None:
+        """Finalize any in-progress utterance; call at session end."""
         if self._current_id is not None:
             self._finalize()
+
+    def _buffered_s(self) -> float:
+        return sum(len(c) for c in self._chunks) / SAMPLE_RATE
 
     def _start_utterance(self, mic_rms: float, lb_rms: float) -> None:
         self._current_id = str(uuid.uuid4())
         self._speaker = "You" if mic_rms >= lb_rms else "Them"
-        self._buffer = np.empty(0, dtype=np.float32)
+        self._chunks = []
         self._silence_run_s = 0.0
         self._audio_since_partial_s = 0.0
 
     def _transcribe(self, beam: int) -> str:
-        if len(self._buffer) == 0:
+        if not self._chunks:
             return ""
-        return clean_text(self._transcribe_fn(self._buffer, beam))
+        buffer = np.concatenate(self._chunks)
+        return clean_text(self._transcribe_fn(buffer, beam))
 
     def _finalize(self) -> None:
         self._finalize_with(self._transcribe(self._final_beam))
@@ -119,13 +124,14 @@ class UtteranceAssembler:
 
     def _reset(self) -> None:
         self._current_id = None
-        self._buffer = np.empty(0, dtype=np.float32)
+        self._chunks = []
         self._silence_run_s = 0.0
         self._audio_since_partial_s = 0.0
 
     def _emit_segment(self, text: str, is_final: bool) -> None:
+        assert self._current_id is not None, "_emit_segment called outside an active utterance"
         seg = TranscriptSegment(
-            id=self._current_id or str(uuid.uuid4()),
+            id=self._current_id,
             session_id=self._session_id,
             speaker=self._speaker,
             wall_clock_time=self._last_wall_clock or datetime.now(),
