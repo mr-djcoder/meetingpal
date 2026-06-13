@@ -1,0 +1,64 @@
+# Node.js / Electron
+node_modules/
+dist/
+.vite/
+out/
+*.log
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec.bak
+
+# PyInstaller output (but keep meetingpal.spec)
+dist/meetingpal/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Coverage / test artifacts
+coverage/
+.pytest_cache/
+htmlcov/
+.nyc_output/
+
+# Electron build artifacts
+MeetingPal-*.exe
+*.nupkg
+RELEASES
+
+# Temporary files
+*.tmp
+*.swp
+*.bak
+
+# ML model weights / caches (large, redownloadable)
+models/
+*.bin
+*.pt
+*.onnx
+.mypy_cache/
+
+# Secrets — defense-in-depth (app stores API key in Windows Credential Manager, never on disk)
+*.key
+preferences.json

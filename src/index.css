@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --transcript-font-size: 14px;
+  }
+
+  body {
+    @apply bg-gray-900 text-gray-100 font-sans;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  .light body {
+    @apply bg-gray-50 text-gray-900;
+  }
+}
+
+@layer utilities {
+  .transcript-font {
+    font-size: var(--transcript-font-size);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-gray-800;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-600 rounded;
+}
+.light ::-webkit-scrollbar-track {
+  @apply bg-gray-200;
+}
+.light ::-webkit-scrollbar-thumb {
+  @apply bg-gray-400;
+}
