@@ -100,4 +100,6 @@ npm run make               # Package with Electron Forge (Squirrel installer)
 
 ## Status
 
-Core app implemented (capture, transcription, VAD, diarization, Claude streaming Q&A, onboarding, settings, transcript save/export). Active work: caption-style **utterance assembler** to replace per-chunk fragments with whole-statement transcript lines — see `docs/superpowers/specs/2026-06-13-utterance-assembler-design.md`.
+Core app implemented (capture, transcription, VAD, diarization, Claude streaming Q&A, onboarding, settings, transcript save/export).
+
+Transcription uses a caption-style **utterance assembler** (`backend/utterance.py`): contiguous 0.5s audio frames are VAD-gated and accumulated into a growing buffer; live partial lines stream as someone speaks (rendered grey/italic) and settle into one clean, whole-statement final on a speech pause, sentence punctuation, or a 15s cap. Partials and their final share an id, upserted in both the renderer and the persisted session. See the design spec at `docs/superpowers/specs/2026-06-13-utterance-assembler-design.md` and plan at `docs/superpowers/plans/2026-06-13-utterance-assembler.md`.
