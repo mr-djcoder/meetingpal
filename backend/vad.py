@@ -27,6 +27,18 @@ class SileroVAD:
         )
         return len(result) > 0
 
+    def is_speech_frame(self, frame: np.ndarray) -> bool:
+        """Speech check tuned for short (~0.5s) frames."""
+        tensor = torch.from_numpy(frame.copy()).float()
+        result = get_speech_timestamps(
+            tensor,
+            self._model,
+            sampling_rate=16000,
+            threshold=self._threshold,
+            min_speech_duration_ms=100,
+        )
+        return len(result) > 0
+
     def reset(self) -> None:
         """Reset VAD state — call between sessions."""
         self._model.reset_states()

@@ -3,15 +3,14 @@ from __future__ import annotations
 
 import queue
 import threading
-import uuid
 from datetime import datetime
-from typing import Callable, Literal
+from typing import Callable
 
 import numpy as np
 from faster_whisper import WhisperModel
 
-from backend.diarizer import get_speaker
 from backend.models import TranscriptSegment
+from backend.utterance import UtteranceAssembler
 from backend.vad import SileroVAD
 
 DownloadProgressCallback = Callable[[float], None]
@@ -33,9 +32,9 @@ class WhisperTranscriber:
         self._worker: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._vad: SileroVAD | None = None  # lazy-loaded in load_model()
-        self._last_text = ""
         self._session_started_at: datetime | None = None
         self._session_id: str = ""
+        self._assembler: UtteranceAssembler | None = None
 
     @property
     def model_loaded(self) -> bool:
@@ -69,22 +68,49 @@ class WhisperTranscriber:
             )
         self._model_loaded = True
 
+    def transcribe(self, buffer: np.ndarray, beam_size: int) -> str:
+        """Transcribe a complete audio buffer to text. Called from the worker thread."""
+        if self._model is None:
+            return ""
+        try:
+            segments, _info = self._model.transcribe(
+                buffer,
+                beam_size=beam_size,
+                vad_filter=True,
+                condition_on_previous_text=False,
+                temperature=0.0,
+                word_timestamps=False,
+            )
+            return " ".join(s.text.strip() for s in segments).strip()
+        except Exception:
+            return ""
+
     def start(self, session_id: str, session_started_at: datetime) -> None:
         """Start the worker thread for a new session."""
         self._session_id = session_id
         self._session_started_at = session_started_at
-        self._last_text = ""
         self._vad.reset()
+        self._assembler = UtteranceAssembler(
+            transcribe_fn=self.transcribe,
+            emit_fn=self._emit_callback if self._emit_callback else (lambda _seg: None),
+            session_id=session_id,
+        )
         self._stop_event.clear()
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
 
     def stop(self) -> None:
-        """Signal the worker to stop and wait for it to drain the queue."""
+        """Signal the worker to stop, wait for it to drain, then flush a final utterance."""
         self._stop_event.set()
         self._queue.put(None)  # sentinel
         if self._worker:
             self._worker.join(timeout=10)
+        # Flush AFTER the worker has exited so the Whisper model is only ever accessed
+        # by one thread at a time (WhisperModel is not thread-safe). With the worker
+        # dead, reading the assembler buffer and transcribing from this thread is safe,
+        # and emit_callback only schedules a broadcast on the event loop.
+        if self._assembler:
+            self._assembler.flush()
 
     def enqueue(self, chunk: np.ndarray, mic_rms: float, loopback_rms: float) -> None:
         """Enqueue a 3s audio chunk for transcription."""
@@ -115,39 +141,7 @@ class WhisperTranscriber:
         wall_clock: datetime,
         offset: float,
     ) -> None:
-        if self._model is None:
+        if self._model is None or self._vad is None or self._assembler is None:
             return
-        # VAD gate
-        if self._vad is None or not self._vad.is_speech(chunk):
-            return
-        # Transcribe
-        try:
-            segments, _info = self._model.transcribe(
-                chunk,
-                beam_size=5,
-                vad_filter=True,
-                condition_on_previous_text=True,
-                temperature=0.0,
-                word_timestamps=False,
-            )
-            text = " ".join(s.text.strip() for s in segments).strip()
-        except Exception:
-            return
-        if not text or text == self._last_text:
-            return
-        self._last_text = text
-        confidence = 1.0  # faster-whisper doesn't expose no_speech_prob directly in this path
-        speaker = get_speaker(mic_rms, loopback_rms)
-        seg = TranscriptSegment(
-            id=str(uuid.uuid4()),
-            session_id=session_id,
-            speaker=speaker,
-            wall_clock_time=wall_clock,
-            session_offset_seconds=offset,
-            text=text,
-            is_final=True,
-            audio_source="mixed",
-            confidence=confidence,
-        )
-        if self._emit_callback:
-            self._emit_callback(seg)
+        is_speech = self._vad.is_speech_frame(chunk)
+        self._assembler.process(chunk, is_speech, mic_rms, loopback_rms, wall_clock, offset)
