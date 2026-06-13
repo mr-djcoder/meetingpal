@@ -104,17 +104,17 @@ class WhisperTranscriber:
         self._worker.start()
 
     def stop(self) -> None:
-        """Signal the worker to stop and wait for it to drain the queue."""
-        # Flush the assembler first so any in-progress utterance is finalized and
-        # emitted before the worker is torn down.  flush() runs synchronously in the
-        # calling thread; emit_callback merely schedules a broadcast so it is safe to
-        # call here even though the worker is still running.
-        if self._assembler:
-            self._assembler.flush()
+        """Signal the worker to stop, wait for it to drain, then flush a final utterance."""
         self._stop_event.set()
         self._queue.put(None)  # sentinel
         if self._worker:
             self._worker.join(timeout=10)
+        # Flush AFTER the worker has exited so the Whisper model is only ever accessed
+        # by one thread at a time (WhisperModel is not thread-safe). With the worker
+        # dead, reading the assembler buffer and transcribing from this thread is safe,
+        # and emit_callback only schedules a broadcast on the event loop.
+        if self._assembler:
+            self._assembler.flush()
 
     def enqueue(self, chunk: np.ndarray, mic_rms: float, loopback_rms: float) -> None:
         """Enqueue a 3s audio chunk for transcription."""
