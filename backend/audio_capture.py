@@ -152,7 +152,7 @@ class AudioCapture:
                 mic_rms = self.get_mic_rms()
                 lb_rms = self.get_loopback_rms()
                 self._samples_since_last_emit = 0
-            chunk = _mix_aligned(mic_tail, lb_tail, CHUNK_SAMPLES)
+            chunk = mix_frame(np.array(mic_tail, dtype=np.float32), np.array(lb_tail, dtype=np.float32))
             if len(chunk) > 0:
                 self._chunk_callback(chunk, mic_rms, lb_rms)
 
@@ -174,23 +174,24 @@ class AudioCapture:
             raise RuntimeError("No WASAPI loopback device found")
 
 
-def _mix_aligned(mic_tail: list[float], lb_tail: list[float], chunk_samples: int) -> np.ndarray:
-    """Sum mic + loopback sample-aligned by recency, each at half gain.
+def mix_frame(mic: np.ndarray, lb: np.ndarray) -> np.ndarray:
+    """Sum mic + loopback at half gain, right-justified by recency, zero-padded.
 
-    The two source buffers may differ slightly in length (independent native
-    rates after resample). Align both to the most-recent `chunk_samples` by
-    right-justifying and zero-padding the front of the shorter one.
+    The two sources may differ slightly in length; align both to the longer
+    length by zero-padding the front of the shorter one, then sum at half gain.
     """
-    def _tail(samples: list[float]) -> np.ndarray:
-        arr = np.array(samples[-chunk_samples:], dtype=np.float32)
-        if len(arr) < chunk_samples:
-            arr = np.concatenate([np.zeros(chunk_samples - len(arr), dtype=np.float32), arr])
-        return arr
-
-    if not mic_tail and not lb_tail:
+    n = max(len(mic), len(lb))
+    if n == 0:
         return np.empty(0, dtype=np.float32)
-    mixed = _tail(mic_tail) * 0.5 + _tail(lb_tail) * 0.5
-    return np.clip(mixed, -1.0, 1.0)
+
+    def _pad(arr: np.ndarray) -> np.ndarray:
+        a = np.asarray(arr, dtype=np.float32)
+        if len(a) < n:
+            a = np.concatenate([np.zeros(n - len(a), dtype=np.float32), a])
+        return a
+
+    mixed = _pad(mic) * 0.5 + _pad(lb) * 0.5
+    return np.clip(mixed, -1.0, 1.0).astype(np.float32)
 
 
 def enumerate_devices(pa: pyaudio.PyAudio | None = None) -> list[AudioDevice]:
