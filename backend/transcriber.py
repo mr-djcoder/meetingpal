@@ -3,14 +3,12 @@ from __future__ import annotations
 
 import queue
 import threading
-import uuid
 from datetime import datetime
-from typing import Callable, Literal
+from typing import Callable
 
 import numpy as np
 from faster_whisper import WhisperModel
 
-from backend.diarizer import get_speaker
 from backend.models import TranscriptSegment
 from backend.utterance import UtteranceAssembler
 from backend.vad import SileroVAD
@@ -34,7 +32,6 @@ class WhisperTranscriber:
         self._worker: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._vad: SileroVAD | None = None  # lazy-loaded in load_model()
-        self._last_text = ""
         self._session_started_at: datetime | None = None
         self._session_id: str = ""
         self._assembler: UtteranceAssembler | None = None
@@ -92,7 +89,6 @@ class WhisperTranscriber:
         """Start the worker thread for a new session."""
         self._session_id = session_id
         self._session_started_at = session_started_at
-        self._last_text = ""
         self._vad.reset()
         self._assembler = UtteranceAssembler(
             transcribe_fn=self.transcribe,
