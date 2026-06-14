@@ -10,7 +10,6 @@ import numpy as np
 from backend.models import TranscriptSegment
 
 SAMPLE_RATE = 16000
-SENTENCE_END: frozenset[str] = frozenset({".", "?", "!"})
 
 TranscribeFn = Callable[[np.ndarray, int], str]
 EmitFn = Callable[[TranscriptSegment], None]
@@ -34,7 +33,7 @@ class UtteranceAssembler:
         session_id: str,
         *,
         partial_interval_s: float = 1.5,
-        silence_finalize_s: float = 0.7,
+        silence_finalize_s: float = 4.0,
         max_utterance_s: float = 15.0,
         partial_beam: int = 1,
         final_beam: int = 5,
@@ -83,9 +82,10 @@ class UtteranceAssembler:
             if self._audio_since_partial_s >= self._partial_interval_s:
                 text = self._transcribe(self._partial_beam)
                 self._audio_since_partial_s = 0.0
-                if text and text[-1] in SENTENCE_END:
-                    self._finalize_with(text)
-                elif text:
+                if text:
+                    # Stream a live partial. The line is NOT split on sentence
+                    # punctuation — a whole spoken message stays one line until an
+                    # end-of-turn silence (silence_finalize_s) or the max-length cap.
                     self._emit_segment(text, is_final=False)
         else:
             if self._current_id is not None:

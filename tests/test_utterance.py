@@ -37,7 +37,7 @@ def feed(asm, *, speech: bool, n: int, mic=0.9, lb=0.1):
 
 
 def test_silence_gap_finalizes_one_segment():
-    asm, rec = build(transcribe_text="hello world.", partial_interval_s=999)
+    asm, rec = build(transcribe_text="hello world.", partial_interval_s=999, silence_finalize_s=0.7)
     feed(asm, speech=True, n=4)      # 2.0s speech, no partial
     feed(asm, speech=False, n=2)     # 1.0s silence >= 0.7s -> finalize
     assert len(rec.segments) == 1
@@ -49,7 +49,7 @@ def test_silence_gap_finalizes_one_segment():
 
 
 def test_silence_below_threshold_does_not_finalize():
-    asm, rec = build(partial_interval_s=999)
+    asm, rec = build(partial_interval_s=999, silence_finalize_s=0.7)
     feed(asm, speech=True, n=2)
     feed(asm, speech=False, n=1)     # 0.5s silence < 0.7s
     assert rec.segments == []
@@ -64,7 +64,7 @@ def test_partial_emitted_after_interval():
 
 
 def test_partials_share_one_id_then_final_reuses_it():
-    asm, rec = build(transcribe_text="hello", partial_interval_s=1.5)
+    asm, rec = build(transcribe_text="hello", partial_interval_s=1.5, silence_finalize_s=0.7)
     feed(asm, speech=True, n=3)      # partial #1
     feed(asm, speech=True, n=3)      # partial #2
     feed(asm, speech=False, n=2)     # finalize
@@ -74,20 +74,25 @@ def test_partials_share_one_id_then_final_reuses_it():
     assert [s.is_final for s in rec.segments] == [False, False, True]
 
 
-def test_punctuation_promotes_partial_to_final():
+def test_sentence_punctuation_does_not_split_the_line():
+    # A whole message stays one line: a sentence-ending '.' must NOT finalize.
+    # The line settles only on an end-of-turn silence or the max-length cap.
     asm, rec = build(transcribe_text="All done.", partial_interval_s=1.5)
-    feed(asm, speech=True, n=3)      # 1.5s -> transcribe -> ends with '.' -> finalize
+    feed(asm, speech=True, n=3)      # 1.5s -> transcribe; '.' must stay a live partial
     assert len(rec.segments) == 1
-    assert rec.segments[0].is_final is True
+    assert rec.segments[0].is_final is False
     assert rec.segments[0].text == "All done."
 
 
-def test_next_utterance_gets_new_id_after_punctuation_final():
-    asm, rec = build(transcribe_text="Done.", partial_interval_s=1.5)
-    feed(asm, speech=True, n=3)      # finalize utterance 1
-    feed(asm, speech=True, n=3)      # finalize utterance 2
-    assert len(rec.segments) == 2
-    assert rec.segments[0].id != rec.segments[1].id
+def test_two_utterances_separated_by_silence_get_new_ids():
+    asm, rec = build(transcribe_text="Done.", partial_interval_s=999, silence_finalize_s=0.7)
+    feed(asm, speech=True, n=2)      # utterance 1
+    feed(asm, speech=False, n=2)     # 1.0s silence -> finalize 1
+    feed(asm, speech=True, n=2)      # utterance 2
+    feed(asm, speech=False, n=2)     # finalize 2
+    finals = [s for s in rec.segments if s.is_final]
+    assert len(finals) == 2
+    assert finals[0].id != finals[1].id
 
 
 def test_max_length_forces_final_without_silence():
@@ -139,7 +144,7 @@ def test_flush_noop_when_idle():
 
 
 def test_empty_transcription_is_dropped():
-    asm, rec = build(transcribe_text="   ", partial_interval_s=999)
+    asm, rec = build(transcribe_text="   ", partial_interval_s=999, silence_finalize_s=0.7)
     feed(asm, speech=True, n=2)
     feed(asm, speech=False, n=2)     # finalize, but text is blank
     assert rec.segments == []
