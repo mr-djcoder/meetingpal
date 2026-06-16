@@ -101,3 +101,5 @@ npm run make               # Package with Electron Forge (Squirrel installer)
 ## Status
 
 Core app implemented (capture, transcription, VAD, diarization, Claude streaming Q&A, onboarding, settings, transcript save/export). Active work: caption-style **utterance assembler** to replace per-chunk fragments with whole-statement transcript lines — see `docs/superpowers/specs/2026-06-13-utterance-assembler-design.md`.
+
+**Overlay mode:** pin the window always-on-top and adjust whole-window transparency (TopBar controls) to float MeetingPal over a video call while still reading the transcript and typing. Settings persist across restarts. See `docs/superpowers/specs/2026-06-15-overlay-window-design.md`.
