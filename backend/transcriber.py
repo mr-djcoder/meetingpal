@@ -28,13 +28,15 @@ class WhisperTranscriber:
         self._download_progress_cb = download_progress_cb
         self._model: WhisperModel | None = None
         self._model_loaded = False
-        self._queue: queue.Queue[tuple[np.ndarray, float, float, str, datetime, float] | None] = queue.Queue()
+        self._queue: queue.Queue[tuple | None] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._vad: SileroVAD | None = None  # lazy-loaded in load_model()
+        self._mic_vad: SileroVAD | None = None  # lazy-loaded in load_model()
+        self._lb_vad: SileroVAD | None = None
         self._session_started_at: datetime | None = None
         self._session_id: str = ""
-        self._assembler: UtteranceAssembler | None = None
+        self._mic_assembler: UtteranceAssembler | None = None
+        self._lb_assembler: UtteranceAssembler | None = None
 
     @property
     def model_loaded(self) -> bool:
@@ -50,9 +52,11 @@ class WhisperTranscriber:
             self._queue.put(None)
             self._worker.join(timeout=5)
 
-        # Lazy-load VAD on first model load
-        if self._vad is None:
-            self._vad = SileroVAD()
+        # Lazy-load one VAD per source on first model load
+        if self._mic_vad is None:
+            self._mic_vad = SileroVAD()
+        if self._lb_vad is None:
+            self._lb_vad = SileroVAD()
 
         try:
             self._model = WhisperModel(
@@ -89,12 +93,13 @@ class WhisperTranscriber:
         """Start the worker thread for a new session."""
         self._session_id = session_id
         self._session_started_at = session_started_at
-        self._vad.reset()
-        self._assembler = UtteranceAssembler(
-            transcribe_fn=self.transcribe,
-            emit_fn=self._emit_callback if self._emit_callback else (lambda _seg: None),
-            session_id=session_id,
-        )
+        if self._mic_vad:
+            self._mic_vad.reset()
+        if self._lb_vad:
+            self._lb_vad.reset()
+        emit = self._emit_callback if self._emit_callback else (lambda _seg: None)
+        self._mic_assembler = UtteranceAssembler(self.transcribe, emit, session_id, speaker="You")
+        self._lb_assembler = UtteranceAssembler(self.transcribe, emit, session_id, speaker="Them")
         self._stop_event.clear()
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
@@ -109,16 +114,18 @@ class WhisperTranscriber:
         # by one thread at a time (WhisperModel is not thread-safe). With the worker
         # dead, reading the assembler buffer and transcribing from this thread is safe,
         # and emit_callback only schedules a broadcast on the event loop.
-        if self._assembler:
-            self._assembler.flush()
+        if self._mic_assembler:
+            self._mic_assembler.flush()
+        if self._lb_assembler:
+            self._lb_assembler.flush()
 
-    def enqueue(self, chunk: np.ndarray, mic_rms: float, loopback_rms: float) -> None:
-        """Enqueue a 3s audio chunk for transcription."""
+    def enqueue(self, source: str, frame: np.ndarray, rms: float) -> None:
+        """Enqueue a 0.5s audio frame for a source ('mic' or 'loopback')."""
         now = datetime.now()
         offset = 0.0
         if self._session_started_at:
             offset = (now - self._session_started_at).total_seconds()
-        self._queue.put((chunk, mic_rms, loopback_rms, self._session_id, now, offset))
+        self._queue.put((source, frame, rms, self._session_id, now, offset))
 
     def _worker_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -128,20 +135,26 @@ class WhisperTranscriber:
                 continue
             if item is None:
                 break
-            chunk, mic_rms, loopback_rms, session_id, wall_clock, offset = item
-            self._process_chunk(chunk, mic_rms, loopback_rms, session_id, wall_clock, offset)
+            source, frame, rms, session_id, wall_clock, offset = item
+            self._process_chunk(source, frame, rms, session_id, wall_clock, offset)
             self._queue.task_done()
 
     def _process_chunk(
         self,
-        chunk: np.ndarray,
-        mic_rms: float,
-        loopback_rms: float,
+        source: str,
+        frame: np.ndarray,
+        rms: float,
         session_id: str,
         wall_clock: datetime,
         offset: float,
     ) -> None:
-        if self._model is None or self._vad is None or self._assembler is None:
+        if self._model is None:
             return
-        is_speech = self._vad.is_speech_frame(chunk)
-        self._assembler.process(chunk, is_speech, mic_rms, loopback_rms, wall_clock, offset)
+        if source == "mic":
+            vad, assembler = self._mic_vad, self._mic_assembler
+        else:
+            vad, assembler = self._lb_vad, self._lb_assembler
+        if vad is None or assembler is None:
+            return
+        is_speech = vad.is_speech_frame(frame)
+        assembler.process(frame, is_speech, wall_clock, offset)
