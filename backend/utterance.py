@@ -32,6 +32,7 @@ class UtteranceAssembler:
         emit_fn: EmitFn,
         session_id: str,
         *,
+        speaker: Literal["You", "Them"],
         partial_interval_s: float = 1.5,
         silence_finalize_s: float = 4.0,
         max_utterance_s: float = 15.0,
@@ -49,7 +50,7 @@ class UtteranceAssembler:
 
         self._chunks: list[np.ndarray] = []
         self._current_id: str | None = None
-        self._speaker: Literal["You", "Them"] = "You"
+        self._speaker: Literal["You", "Them"] = speaker
         self._silence_run_s = 0.0
         self._audio_since_partial_s = 0.0
         self._last_wall_clock: datetime | None = None
@@ -59,8 +60,6 @@ class UtteranceAssembler:
         self,
         frame: np.ndarray,
         is_speech: bool,
-        mic_rms: float,
-        lb_rms: float,
         wall_clock: datetime,
         offset: float,
     ) -> None:
@@ -70,7 +69,7 @@ class UtteranceAssembler:
 
         if is_speech:
             if self._current_id is None:
-                self._start_utterance(mic_rms, lb_rms)
+                self._start_utterance()
             self._chunks.append(frame)
             self._silence_run_s = 0.0
             self._audio_since_partial_s += frame_s
@@ -101,9 +100,8 @@ class UtteranceAssembler:
     def _buffered_s(self) -> float:
         return sum(len(c) for c in self._chunks) / SAMPLE_RATE
 
-    def _start_utterance(self, mic_rms: float, lb_rms: float) -> None:
+    def _start_utterance(self) -> None:
         self._current_id = str(uuid.uuid4())
-        self._speaker = "You" if mic_rms >= lb_rms else "Them"
         self._chunks = []
         self._silence_run_s = 0.0
         self._audio_since_partial_s = 0.0
@@ -138,7 +136,7 @@ class UtteranceAssembler:
             session_offset_seconds=self._last_offset,
             text=text,
             is_final=is_final,
-            audio_source="mixed",
+            audio_source="mic" if self._speaker == "You" else "loopback",
             confidence=1.0,
         )
         self._emit_fn(seg)

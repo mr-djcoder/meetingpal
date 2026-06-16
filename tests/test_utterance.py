@@ -20,20 +20,21 @@ class Recorder:
         self.segments.append(seg)
 
 
-def build(transcribe_text="hello world", **kw):
+def build(transcribe_text="hello world", speaker="You", **kw):
     rec = Recorder()
     asm = UtteranceAssembler(
         transcribe_fn=lambda buf, beam: transcribe_text,
         emit_fn=rec,
         session_id="s1",
+        speaker=speaker,
         **kw,
     )
     return asm, rec
 
 
-def feed(asm, *, speech: bool, n: int, mic=0.9, lb=0.1):
+def feed(asm, *, speech: bool, n: int):
     for _ in range(n):
-        asm.process(make_frame(), speech, mic, lb, WALL, 0.0)
+        asm.process(make_frame(), speech, WALL, 0.0)
 
 
 def test_silence_gap_finalizes_one_segment():
@@ -110,23 +111,20 @@ def test_speech_continues_with_new_id_after_forced_final():
     assert rec.segments[0].id != rec.segments[1].id
 
 
-def test_speaker_from_onset_rms_and_held_for_utterance():
-    asm, rec = build(transcribe_text="hi", partial_interval_s=1.5)
-    # Onset frame: mic louder -> "You". Later frames flip rms; speaker must NOT change.
-    asm.process(make_frame(), True, 0.9, 0.1, WALL, 0.0)   # onset -> You
-    asm.process(make_frame(), True, 0.0, 0.9, WALL, 0.0)
-    asm.process(make_frame(), True, 0.0, 0.9, WALL, 0.0)   # triggers partial
-    asm.process(make_frame(), False, 0.0, 0.0, WALL, 0.0)
-    asm.process(make_frame(), False, 0.0, 0.0, WALL, 0.0)  # finalize
-    assert all(s.speaker == "You" for s in rec.segments)
+def test_assembler_emits_its_constructed_speaker_you():
+    asm, rec = build(transcribe_text="hi", speaker="You", partial_interval_s=1.5, silence_finalize_s=0.7)
+    feed(asm, speech=True, n=3)      # partial
+    feed(asm, speech=False, n=2)     # finalize
+    assert rec.segments and all(s.speaker == "You" for s in rec.segments)
+    assert all(s.audio_source == "mic" for s in rec.segments)
 
 
-def test_speaker_them_when_loopback_louder_at_onset():
-    asm, rec = build(transcribe_text="hi.", partial_interval_s=1.5)
-    asm.process(make_frame(), True, 0.1, 0.9, WALL, 0.0)   # onset -> Them
-    asm.process(make_frame(), True, 0.1, 0.9, WALL, 0.0)
-    asm.process(make_frame(), True, 0.1, 0.9, WALL, 0.0)   # partial -> '.' -> final
+def test_assembler_emits_its_constructed_speaker_them():
+    asm, rec = build(transcribe_text="hi", speaker="Them", partial_interval_s=1.5, silence_finalize_s=0.7)
+    feed(asm, speech=True, n=3)
+    feed(asm, speech=False, n=2)
     assert rec.segments and all(s.speaker == "Them" for s in rec.segments)
+    assert all(s.audio_source == "loopback" for s in rec.segments)
 
 
 def test_flush_finalizes_active_utterance():
