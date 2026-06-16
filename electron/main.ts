@@ -178,6 +178,20 @@ ipcMain.handle('set-preferences', (_e, partial) =>
   apiRequest('PUT', '/api/preferences', partial)
 );
 
+// ── Overlay window controls ─────────────────────────────────────────────────
+const MIN_OPACITY = 0.3;
+
+ipcMain.handle('set-always-on-top', (_e, value: boolean) => {
+  mainWindow?.setAlwaysOnTop(Boolean(value));
+  return Boolean(value);
+});
+
+ipcMain.handle('set-opacity', (_e, value: number) => {
+  const clamped = Math.min(1, Math.max(MIN_OPACITY, Number(value)));
+  mainWindow?.setOpacity(clamped);
+  return clamped;
+});
+
 ipcMain.handle('set-api-key', async (_e, key: string) => {
   await keytar.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key);
 });
