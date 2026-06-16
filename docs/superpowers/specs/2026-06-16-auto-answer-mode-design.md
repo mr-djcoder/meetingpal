@@ -1,7 +1,20 @@
 # Auto-Answer Mode — Design Spec (PROPOSAL)
 
 **Date:** 2026-06-16
-**Status:** ⚠️ PROPOSAL — drafted autonomously for review. Default decisions below were chosen by the assistant, NOT yet approved. Please confirm / adjust the **Open decisions** before an implementation plan is written. No code has been written.
+**Status:** APPROVED — decisions confirmed by the user 2026-06-16. Building now.
+
+## Confirmed decisions (override the proposals below where they differ)
+
+- **Providers: Claude AND Gemini**, with a model picker listing the **top 3 each**:
+  - Claude (stable IDs): `claude-haiku-4-5-20251001` (fast — **default**), `claude-sonnet-4-6` (balanced), `claude-opus-4-8` (most capable).
+  - Gemini: **fetch the live model list from Google's ListModels API at runtime** to populate the dropdown (IDs churn — Gemini 2.0 was shut down 2026-06-01). Static fallback list if the fetch fails: `Gemini 3.5 Flash` (fast — default), `Gemini 2.5 Pro`, `Gemini 3.1 Flash-Lite`.
+- **Question detection:** local heuristic over **finalized `Them` utterances only** (`is_final and speaker == "Them"`) — text ends with `?` OR begins with an interrogative lead (what/why/how/when/where/who/which/can/could/would/should/do/does/did/is/are/tell me/explain/walk me through). Never on the user's own (`You`) speech.
+- **Concurrency:** fire after finalize; **one** auto-answer in flight; a new detected question **cancels + replaces** the previous (`asyncio.Task`); **~2s min-interval**.
+- **Output:** stream the answer; render it prefixed literally as **`AI:<response>`**; latency-critical → default to the fast model of the chosen provider.
+- **Config (persisted in `preferences.json`):** `auto_answer_enabled: bool = False`, `auto_answer_prompt: str` (first-person starter default), `auto_answer_provider: str = "claude"`, `auto_answer_model: str`.
+- **Keys:** Gemini uses its **own** key in Windows Credential Manager (keytar account `gemini-api-key`), read by Electron main like the Claude key. Never hardcoded or logged.
+- **Privacy:** selecting Gemini sends transcript text to Google — the README privacy section is updated to state outbound calls go to the Claude API **and** (when Gemini is selected) the Gemini API.
+- **UI:** a dedicated **Suggested Answer** panel (question + streaming `AI:` answer) + a quick **TopBar toggle** + the prompt/provider/model/enable controls in **Settings**.
 
 ## Goal
 
