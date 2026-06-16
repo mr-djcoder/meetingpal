@@ -32,6 +32,8 @@ class UserPreferences:
     font_size: int = 14
     theme: Literal["dark", "light"] = "dark"
     onboarding_completed: bool = False
+    always_on_top: bool = False
+    window_opacity: float = 1.0
 
 
 def load_preferences() -> UserPreferences:

@@ -149,6 +149,8 @@ class PrefsUpdate(BaseModel):
     font_size: int | None = None
     theme: str | None = None
     onboarding_completed: bool | None = None
+    always_on_top: bool | None = None
+    window_opacity: float | None = None
 
 
 @app.put("/api/preferences")
