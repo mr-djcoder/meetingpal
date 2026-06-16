@@ -12,7 +12,7 @@ Real-time meeting transcription and AI assistant for Windows. Captures system au
 | UI | React 18 + TypeScript 5 + TailwindCSS + Zustand |
 | Backend sidecar | Python 3.11+ + FastAPI (localhost WebSocket/REST) |
 | Transcription | faster-whisper (local, `base.en` default, GPU→CPU int8 fallback) |
-| Audio capture | PyAudioWPatch (WASAPI loopback + mic, mixed to 16kHz mono) |
+| Audio capture | PyAudioWPatch (WASAPI loopback + mic, two independent 16kHz streams) |
 | Voice activity | Silero VAD |
 | AI Q&A | Anthropic SDK — `claude-sonnet-4-6` default, SSE streaming |
 | Secrets | Windows Credential Manager via keytar |
@@ -94,7 +94,7 @@ npm run make               # Package with Electron Forge (Squirrel installer)
 
 ## Key constraints
 
-- Audio: WASAPI loopback (system) + default mic, mixed at 16kHz mono.
+- Audio: WASAPI loopback (system) + default mic, captured as two independent 16kHz streams (not mixed).
 - Claude context: recent transcript segments up to ~80K tokens per request.
 - Transcript storage: `Documents/MeetingPal/recordings/YYYY-MM-DD_HH-MM/`.
 
@@ -103,3 +103,5 @@ npm run make               # Package with Electron Forge (Squirrel installer)
 Core app implemented (capture, transcription, VAD, diarization, Claude streaming Q&A, onboarding, settings, transcript save/export).
 
 Transcription uses a caption-style **utterance assembler** (`backend/utterance.py`): contiguous 0.5s audio frames are VAD-gated and accumulated into a growing buffer; live partial lines stream as someone speaks (rendered grey/italic) and settle into one clean line **per speaking turn** — the line finalizes only on an end-of-turn pause (~4s silence) or a 15s safety cap. A whole multi-sentence message stays on one line (it is **not** split on sentence punctuation). Partials and their final share an id, upserted in both the renderer and the persisted session. See the design spec at `docs/superpowers/specs/2026-06-13-utterance-assembler-design.md` and plan at `docs/superpowers/plans/2026-06-13-utterance-assembler.md`.
+
+**Dual-stream:** the microphone and the system (loopback) audio are transcribed as **two independent full-level streams**, each with its own utterance assembler — so your voice isn't attenuated by mixing, and `You`/`Them` labels are exact (source-based, not an RMS-energy guess). One Whisper model + one worker thread serve both streams; a silent source is VAD-gated so transcription only doubles while both speak. See `docs/superpowers/specs/2026-06-16-dual-stream-transcription-design.md`.
