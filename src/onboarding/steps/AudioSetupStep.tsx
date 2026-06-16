@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 interface AudioDevice {
   index: number;
@@ -17,15 +17,28 @@ export function AudioSetupStep({ onNext, onBack }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    window.electronAPI
-      .getDevices()
-      .then((res) => {
+  const loadDevices = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    // The sidecar may still be loading the Whisper model when this step mounts,
+    // so getDevices can fail transiently — retry with backoff instead of latching.
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const res = await window.electronAPI.getDevices();
         setDevices(res.devices as AudioDevice[]);
-      })
-      .catch(() => setError('Failed to enumerate audio devices.'))
-      .finally(() => setLoading(false));
+        setLoading(false);
+        return;
+      } catch {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+    setError('Failed to enumerate audio devices.');
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    loadDevices();
+  }, [loadDevices]);
 
   const defaultMic = devices.find((d) => d.device_type === 'microphone' && d.is_default);
   const defaultLoopback = devices.find((d) => d.device_type === 'loopback' && d.is_default);
@@ -41,7 +54,17 @@ export function AudioSetupStep({ onNext, onBack }: Props) {
       </div>
 
       {loading && <p className="text-gray-400 text-sm">Detecting audio devices…</p>}
-      {error && <p className="text-red-400 text-sm">{error}</p>}
+      {error && (
+        <div className="flex items-center gap-3">
+          <p className="text-red-400 text-sm">{error}</p>
+          <button
+            onClick={loadDevices}
+            className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {!loading && !error && (
         <div className="space-y-3">
