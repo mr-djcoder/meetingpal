@@ -40,6 +40,8 @@ interface UserPreferences {
   font_size: number;
   theme: 'dark' | 'light';
   onboarding_completed: boolean;
+  always_on_top: boolean;
+  window_opacity: number;
 }
 
 interface AudioLevelFrame {
@@ -73,6 +75,8 @@ interface ElectronAPI {
   setPreferences(partial: Partial<UserPreferences>): Promise<UserPreferences>;
   setApiKey(key: string): Promise<void>;
   hasApiKey(): Promise<boolean>;
+  setAlwaysOnTop(value: boolean): Promise<boolean>;
+  setOpacity(value: number): Promise<number>;
   onTranscriptSegment(cb: (segment: TranscriptSegment) => void): () => void;
   onAudioLevel(cb: (frame: AudioLevelFrame) => void): () => void;
   onAiToken(cb: (token: string) => void): () => void;

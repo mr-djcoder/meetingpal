@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setApiKey: (key: string) => ipcRenderer.invoke('set-api-key', key),
   hasApiKey: () => ipcRenderer.invoke('has-api-key'),
 
+  // Overlay window controls
+  setAlwaysOnTop: (value: boolean) => ipcRenderer.invoke('set-always-on-top', value),
+  setOpacity: (value: number) => ipcRenderer.invoke('set-opacity', value),
+
   // Real-time listeners — each returns a cleanup function
   onTranscriptSegment: (cb: (segment: unknown) => void) => {
     const handler = (_: Electron.IpcRendererEvent, segment: unknown) => cb(segment);
