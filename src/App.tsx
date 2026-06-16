@@ -65,6 +65,9 @@ function MainLayout() {
       document.documentElement.classList.toggle('dark', p.theme === 'dark');
       document.documentElement.classList.toggle('light', p.theme === 'light');
       document.documentElement.style.setProperty('--transcript-font-size', `${p.font_size}px`);
+      const overlay = prefs as unknown as { always_on_top?: boolean; window_opacity?: number };
+      window.electronAPI.setAlwaysOnTop(Boolean(overlay.always_on_top));
+      window.electronAPI.setOpacity(overlay.window_opacity ?? 1);
     });
   }, [settingsOpen]); // re-apply after settings close
 
