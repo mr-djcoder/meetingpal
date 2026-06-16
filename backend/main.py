@@ -149,6 +149,10 @@ class PrefsUpdate(BaseModel):
     font_size: int | None = None
     theme: str | None = None
     onboarding_completed: bool | None = None
+    auto_answer_enabled: bool | None = None
+    auto_answer_prompt: str | None = None
+    auto_answer_provider: str | None = None
+    auto_answer_model: str | None = None
 
 
 @app.put("/api/preferences")

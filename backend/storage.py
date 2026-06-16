@@ -32,6 +32,13 @@ class UserPreferences:
     font_size: int = 14
     theme: Literal["dark", "light"] = "dark"
     onboarding_completed: bool = False
+    auto_answer_enabled: bool = False
+    auto_answer_prompt: str = (
+        "You are me in this conversation. Answer the other person's question "
+        "concisely, in the first person, using the meeting context."
+    )
+    auto_answer_provider: str = "claude"
+    auto_answer_model: str = "claude-haiku-4-5-20251001"
 
 
 def load_preferences() -> UserPreferences:

@@ -40,6 +40,10 @@ interface UserPreferences {
   font_size: number;
   theme: 'dark' | 'light';
   onboarding_completed: boolean;
+  auto_answer_enabled: boolean;
+  auto_answer_prompt: string;
+  auto_answer_provider: string;
+  auto_answer_model: string;
 }
 
 interface AudioLevelFrame {
