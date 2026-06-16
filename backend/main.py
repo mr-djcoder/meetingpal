@@ -220,8 +220,8 @@ async def start_session(body: StartSessionBody, request: Request):
     )
     active_session = session
 
-    def _chunk_cb(chunk, mic_rms, lb_rms):
-        transcriber.enqueue(chunk, mic_rms, lb_rms)
+    def _chunk_cb(source, frame, rms):
+        transcriber.enqueue(source, frame, rms)
 
     audio_capture = AudioCapture(
         chunk_callback=_chunk_cb,
