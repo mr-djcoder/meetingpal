@@ -14,9 +14,19 @@ function formatDuration(seconds: number): string {
 export function TopBar({ onSettingsOpen }: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
   const [hasKey, setHasKey] = useState(false);
+  const [alwaysOnTop, setAlwaysOnTop] = useState(false);
+  const [opacity, setOpacityState] = useState(1);
+  const [opacityOpen, setOpacityOpen] = useState(false);
 
   useEffect(() => {
     window.electronAPI.hasApiKey().then(setHasKey).catch(() => setHasKey(false));
+  }, []);
+
+  useEffect(() => {
+    window.electronAPI.getPreferences().then((prefs) => {
+      setAlwaysOnTop(Boolean(prefs.always_on_top));
+      setOpacityState(prefs.window_opacity ?? 1);
+    }).catch(() => { /* keep defaults */ });
   }, []);
 
   const handleToggle = async () => {
@@ -25,6 +35,19 @@ export function TopBar({ onSettingsOpen }: Props) {
     } else {
       await startRecording();
     }
+  };
+
+  const toggleAlwaysOnTop = async () => {
+    const next = !alwaysOnTop;
+    setAlwaysOnTop(next);
+    await window.electronAPI.setAlwaysOnTop(next);
+    await window.electronAPI.setPreferences({ always_on_top: next });
+  };
+
+  const changeOpacity = async (value: number) => {
+    setOpacityState(value);
+    const applied = await window.electronAPI.setOpacity(value);
+    await window.electronAPI.setPreferences({ window_opacity: applied });
   };
 
   return (
@@ -59,6 +82,45 @@ export function TopBar({ onSettingsOpen }: Props) {
 
       {/* Right side */}
       <div className="flex items-center gap-3">
+        {/* Always-on-top pin */}
+        <button
+          onClick={toggleAlwaysOnTop}
+          title={alwaysOnTop ? 'Unpin (allow other windows on top)' : 'Pin on top of all windows'}
+          className={`p-1.5 rounded transition-colors ${
+            alwaysOnTop ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5l14 14M9 5h6l-1 5 3 3v2H7v-2l3-3-1-5z" />
+          </svg>
+        </button>
+
+        {/* Opacity control */}
+        <div className="relative">
+          <button
+            onClick={() => setOpacityOpen((v) => !v)}
+            title="Window transparency"
+            className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+          >
+            {Math.round(opacity * 100)}%
+          </button>
+          {opacityOpen && (
+            <div className="absolute right-0 top-8 z-20 bg-gray-800 border border-gray-600 rounded-lg p-3 shadow-lg w-44">
+              <label className="text-xs text-gray-400 block mb-2">Transparency</label>
+              <input
+                type="range"
+                min={30}
+                max={100}
+                step={5}
+                value={Math.round(opacity * 100)}
+                onChange={(e) => changeOpacity(Number(e.target.value) / 100)}
+                className="w-full accent-blue-500"
+              />
+              <div className="text-xs text-gray-500 mt-1 text-right">{Math.round(opacity * 100)}%</div>
+            </div>
+          )}
+        </div>
+
         {/* API key status */}
         <div className="flex items-center gap-1.5">
           <div
