@@ -42,6 +42,7 @@ interface UserPreferences {
   onboarding_completed: boolean;
   always_on_top: boolean;
   window_opacity: number;
+  chat_panel_visible: boolean;
 }
 
 interface AudioLevelFrame {

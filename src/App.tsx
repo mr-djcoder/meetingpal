@@ -24,6 +24,7 @@ function MainLayout() {
   const audioLevels = useWebSocket();
   const { isRecording } = useTranscriptStore();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [chatVisible, setChatVisible] = useState(true);
   const [errorBanner, setErrorBanner] = useState<SidecarError | null>(null);
   const [errorModal, setErrorModal] = useState<SidecarError | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
@@ -71,9 +72,27 @@ function MainLayout() {
     });
   }, [settingsOpen]); // re-apply after settings close
 
+  // Chat panel visibility (mount-only init so a live toggle isn't reset on settings close)
+  useEffect(() => {
+    window.electronAPI.getPreferences().then((prefs) => {
+      const p = prefs as unknown as { chat_panel_visible?: boolean };
+      setChatVisible(p.chat_panel_visible ?? true);
+    }).catch(() => { /* keep default visible */ });
+  }, []);
+
+  const toggleChat = () => {
+    const next = !chatVisible;
+    setChatVisible(next);
+    window.electronAPI.setPreferences({ chat_panel_visible: next } as never);
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-gray-100 overflow-hidden">
-      <TopBar onSettingsOpen={() => setSettingsOpen(true)} />
+      <TopBar
+        onSettingsOpen={() => setSettingsOpen(true)}
+        chatVisible={chatVisible}
+        onToggleChat={toggleChat}
+      />
 
       {/* Error banner (recoverable) */}
       {errorBanner && (
@@ -101,9 +120,12 @@ function MainLayout() {
       )}
 
       {/* Main panels */}
-      <div className="flex-1 grid overflow-hidden" style={{ gridTemplateColumns: '60fr 40fr' }}>
+      <div
+        className="flex-1 grid overflow-hidden"
+        style={{ gridTemplateColumns: chatVisible ? '60fr 40fr' : '1fr' }}
+      >
         <TranscriptPanel />
-        <AIChatPanel />
+        {chatVisible && <AIChatPanel />}
       </div>
 
       {/* Audio visualizer — shown when recording */}

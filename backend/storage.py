@@ -34,6 +34,7 @@ class UserPreferences:
     onboarding_completed: bool = False
     always_on_top: bool = False
     window_opacity: float = 1.0
+    chat_panel_visible: bool = True
 
 
 def load_preferences() -> UserPreferences:

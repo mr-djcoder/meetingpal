@@ -151,6 +151,7 @@ class PrefsUpdate(BaseModel):
     onboarding_completed: bool | None = None
     always_on_top: bool | None = None
     window_opacity: float | None = None
+    chat_panel_visible: bool | None = None
 
 
 @app.put("/api/preferences")
