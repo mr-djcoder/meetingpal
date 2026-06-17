@@ -38,6 +38,7 @@ connected_websockets: set[WebSocket] = set()
 prefs: UserPreferences = UserPreferences()
 _api_key_memory: str | None = None  # Claude key, held in-process only, never on disk
 _gemini_key_memory: str | None = None  # Gemini key, in-process only
+_deepgram_key_memory: str | None = None  # Deepgram key, in-process only
 event_loop: asyncio.AbstractEventLoop | None = None  # captured at startup for cross-thread scheduling
 
 _claude_client = ClaudeClient()
@@ -235,6 +236,14 @@ def store_gemini_key(body: KeyBody):
     global _gemini_key_memory
     _gemini_key_memory = body.api_key
     _flush("[key] Gemini API key stored in memory")
+    return {"stored": True}
+
+
+@app.post("/api/key/deepgram")
+def store_deepgram_key(body: KeyBody):
+    global _deepgram_key_memory
+    _deepgram_key_memory = body.api_key
+    _flush("[key] Deepgram API key stored in memory")
     return {"stored": True}
 
 
