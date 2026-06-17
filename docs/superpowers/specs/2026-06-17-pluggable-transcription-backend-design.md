@@ -71,6 +71,8 @@ changes.
   and `src/types/electron.d.ts`):
   - `transcription_engine: "local" | "cloud" = "local"`
   - `cloud_provider: str = "deepgram"` (future-proofing; only deepgram implemented)
+  - `local_transcribe_mode: "streaming" | "legacy" = "streaming"` (LocalAgreement-2
+    kill-switch — see "Reversibility")
 - `main.py` constructs `LocalBackend` or `DeepgramBackend` at session start based on the
   pref, and wires the same `emit_callback` either way.
 
@@ -107,6 +109,29 @@ Net effect: each second of audio is transcribed ~once instead of O(n²). Largest
 win on GPU (per-audio cost dominates) and on long turns / real speech.
 
 DeepgramBackend is unaffected — Deepgram streams incrementally on its own.
+
+### Reversibility (kill-switch)
+
+This rewrites the most-tested core (`utterance.py`), so it ships **revertible at runtime**,
+not as a one-way replacement:
+
+- The current full-buffer assembler is preserved unchanged as the **`legacy`** path
+  (extracted to a clearly named class, e.g. `LegacyUtteranceAssembler`; its existing tests
+  keep passing). The new LocalAgreement-2 implementation is the **`streaming`** path.
+- New pref `local_transcribe_mode: "streaming" | "legacy" = "streaming"` (mirrored in
+  `PrefsUpdate` and `electron.d.ts`). `LocalBackend` picks the assembler per this pref at
+  session start.
+- **Revert is a pref flip + next session start — no rebuild, no redeploy.** If streaming
+  shows dropped/duplicated words, boundary-accuracy regressions, or stuck partials in real
+  use, switch back to `legacy` immediately.
+- Surfaced in Settings (Local section) as an advanced toggle:
+  `Transcription mode: Streaming (faster) / Legacy (stable)`.
+- The `streaming` default is provisional: if it proves unstable in live testing, change the
+  default to `legacy` (one-line change) until fixed. Both paths are maintained and tested
+  until streaming is proven in the field.
+
+Both assemblers implement the same interface (`process(frame, is_speech, wall_clock,
+offset)` + `flush()`), so `LocalBackend` is agnostic to which is active.
 
 ## Overlapping speech / crosstalk
 
@@ -161,6 +186,8 @@ In `src/components/Settings.tsx`:
 - When **Local** selected → read-only info line:
   `Engine: Local · Device: CPU` (or `GPU (CUDA)`) · `Model: base.en`.
   Device/model come from a sidecar status field.
+  Plus an advanced toggle: `Transcription mode: Streaming (faster) / Legacy (stable)`
+  (the LocalAgreement-2 kill-switch; applies on next session start).
 - When **Cloud** selected:
   - Provider: Deepgram (only option for now).
   - Deepgram API key field (saved via keytar).
@@ -185,6 +212,9 @@ In `src/components/Settings.tsx`:
 - **Streaming assembler:** unit tests for LocalAgreement-2 — feed scripted partial
   hypotheses, assert committed prefix grows correctly, tail re-decodes only, finalize emits
   full text, and that work per utterance is bounded (no full re-transcribe).
+- **Both assembler paths:** `legacy` and `streaming` each satisfy the assembler interface;
+  `LocalBackend` selects per `local_transcribe_mode`; legacy path keeps its existing tests
+  green (kill-switch must actually work).
 - **DeepgramBackend:** **mock WebSocket**, feed canned Deepgram JSON events, assert
   `TranscriptSegment` mapping (speaker by source, interim→partial, final→final, text,
   stable id per utterance). No live API in unit tests.
