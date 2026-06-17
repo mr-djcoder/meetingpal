@@ -13,3 +13,4 @@ torch==2.3.0
 torchaudio==2.3.0
 
 pytest==8.2.0
+google-genai==2.8.0

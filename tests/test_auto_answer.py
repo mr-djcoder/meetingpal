@@ -35,6 +35,7 @@ class Prefs:
         self.auto_answer_enabled = enabled
         self.auto_answer_provider = provider
         self.auto_answer_model = model
+        self.auto_answer_prompt = "Answer as me."
 
 
 class FakeClient:
@@ -42,7 +43,7 @@ class FakeClient:
     def __init__(self):
         self.calls = 0
 
-    async def ask(self, *, question, segments, history, api_key, model):
+    async def ask(self, *, question, segments, history, api_key, model, system_prompt=None):
         self.calls += 1
         yield {"type": "content_delta", "text": "Hello "}
         yield {"type": "content_delta", "text": "world"}
@@ -54,7 +55,7 @@ class HangClient:
     def __init__(self):
         self.cancelled = False
 
-    async def ask(self, *, question, segments, history, api_key, model):
+    async def ask(self, *, question, segments, history, api_key, model, system_prompt=None):
         try:
             yield {"type": "content_delta", "text": "start"}
             await asyncio.Event().wait()  # never resolves

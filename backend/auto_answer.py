@@ -95,17 +95,26 @@ class AutoAnswerOrchestrator:
             self._task.cancel()
 
         model = getattr(prefs, "auto_answer_model", "")
+        prompt = getattr(prefs, "auto_answer_prompt", None)
         self._task = asyncio.ensure_future(
-            self._run(client, key, model, segment.text, segments, history)
+            self._run(client, key, model, prompt, segment.text, segments, history)
         )
 
     async def _run(
-        self, client: Any, key: str, model: str, question: str, segments: list, history: list
+        self,
+        client: Any,
+        key: str,
+        model: str,
+        system_prompt: str | None,
+        question: str,
+        segments: list,
+        history: list,
     ) -> None:
         try:
             await self._broadcast({"type": "auto_answer_start", "question": question})
             async for event in client.ask(
-                question=question, segments=segments, history=history, api_key=key, model=model
+                question=question, segments=segments, history=history,
+                api_key=key, model=model, system_prompt=system_prompt,
             ):
                 etype = event.get("type")
                 if etype == "content_delta":

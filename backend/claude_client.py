@@ -30,12 +30,18 @@ class ClaudeClient:
         history: list[ChatMessage],
         api_key: str,
         model: str = "claude-sonnet-4-6",
+        system_prompt: str | None = None,
     ) -> AsyncGenerator[dict, None]:
-        """Async generator yielding SSE event dicts."""
+        """Async generator yielding SSE event dicts.
+
+        `system_prompt`, when given (auto-answer mode), overrides the default
+        persona while keeping the transcript grounding.
+        """
         client = anthropic.AsyncAnthropic(api_key=api_key)
 
+        persona = system_prompt or SYSTEM_PERSONA
         transcript_text = self._format_transcript(segments)
-        system_prompt = f"{SYSTEM_PERSONA}\n\n## Meeting Transcript\n\n{transcript_text}"
+        system_prompt = f"{persona}\n\n## Meeting Transcript\n\n{transcript_text}"
 
         # Trim transcript to token budget
         system_prompt = await self._trim_to_tokens(
