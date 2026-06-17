@@ -10,7 +10,8 @@ import numpy as np
 from faster_whisper import WhisperModel
 
 from backend.models import TranscriptSegment
-from backend.utterance import UtteranceAssembler
+from backend.utterance import LegacyUtteranceAssembler, UtteranceAssembler
+from backend.streaming_utterance import StreamingUtteranceAssembler
 from backend.vad import SileroVAD
 
 DownloadProgressCallback = Callable[[float], None]
@@ -22,6 +23,7 @@ class WhisperTranscriber:
         model_name: str = "base.en",
         emit_callback: Callable[[TranscriptSegment], None] | None = None,
         download_progress_cb: DownloadProgressCallback | None = None,
+        transcribe_mode: str = "streaming",
     ) -> None:
         self._model_name = model_name
         self._emit_callback = emit_callback
@@ -39,10 +41,19 @@ class WhisperTranscriber:
         self._session_id: str = ""
         self._mic_assembler: UtteranceAssembler | None = None
         self._lb_assembler: UtteranceAssembler | None = None
+        self._assembler_cls = (
+            StreamingUtteranceAssembler if transcribe_mode == "streaming"
+            else LegacyUtteranceAssembler
+        )
+        self._device = "unknown"
 
     @property
     def model_loaded(self) -> bool:
         return self._model_loaded
+
+    @property
+    def device(self) -> str:
+        return self._device
 
     def load_model(self, name: str | None = None) -> None:
         """Load (or reload) the Whisper model. Blocks until ready."""
@@ -62,15 +73,17 @@ class WhisperTranscriber:
                 device="cuda",
                 compute_type="float16",
             )
+            self._device = "cuda"
         except Exception:
             self._model = WhisperModel(
                 self._model_name,
                 device="cpu",
                 compute_type="int8",
             )
+            self._device = "cpu"
         self._model_loaded = True
 
-    def transcribe(self, buffer: np.ndarray, beam_size: int) -> str:
+    def transcribe(self, buffer: np.ndarray, beam_size: int, initial_prompt: str = "") -> str:
         """Transcribe a complete audio buffer to text. Called from the worker thread."""
         if self._model is None:
             return ""
@@ -82,6 +95,7 @@ class WhisperTranscriber:
                 condition_on_previous_text=False,  # avoid latency from carrying context
                 temperature=0.0,
                 word_timestamps=False,
+                initial_prompt=initial_prompt or None,
             )
             return " ".join(s.text.strip() for s in segments).strip()
         except Exception:
@@ -97,8 +111,8 @@ class WhisperTranscriber:
         if self._vad:
             self._vad.reset()
         emit = self._emit_callback if self._emit_callback else (lambda _seg: None)
-        self._mic_assembler = UtteranceAssembler(self.transcribe, emit, session_id, speaker="You")
-        self._lb_assembler = UtteranceAssembler(self.transcribe, emit, session_id, speaker="Them")
+        self._mic_assembler = self._assembler_cls(self.transcribe, emit, session_id, speaker="You")
+        self._lb_assembler = self._assembler_cls(self.transcribe, emit, session_id, speaker="Them")
         self._stop_event.clear()
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
