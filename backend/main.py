@@ -191,6 +191,7 @@ class PrefsUpdate(BaseModel):
     chat_panel_visible: bool | None = None
     custom_titlebar: bool | None = None
     window_opacity: float | None = None
+    transcript_split: float | None = None
 
 
 @app.put("/api/preferences")

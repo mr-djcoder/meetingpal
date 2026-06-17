@@ -47,6 +47,7 @@ interface UserPreferences {
   chat_panel_visible: boolean;
   custom_titlebar: boolean;
   window_opacity: number;
+  transcript_split: number;
 }
 
 interface AudioLevelFrame {

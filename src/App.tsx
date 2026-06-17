@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AIChatPanel } from './components/AIChatPanel';
 import { CustomTitleBar } from './components/CustomTitleBar';
 import { Settings } from './components/Settings';
@@ -26,6 +26,8 @@ function MainLayout() {
   const [autoAnswerOn, setAutoAnswerOn] = useState(false);
   const [chatVisible, setChatVisible] = useState(true);
   const [customTitlebar, setCustomTitlebar] = useState(false);
+  const [splitPct, setSplitPct] = useState(60);
+  const panelsRef = useRef<HTMLDivElement>(null);
   const [errorBanner, setErrorBanner] = useState<SidecarError | null>(null);
   const [errorModal, setErrorModal] = useState<SidecarError | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
@@ -72,10 +74,12 @@ function MainLayout() {
         chat_panel_visible?: boolean;
         custom_titlebar?: boolean;
         window_opacity?: number;
+        transcript_split?: number;
       };
       setAutoAnswerOn(Boolean(aa.auto_answer_enabled));
       setChatVisible(aa.chat_panel_visible ?? true);
       setCustomTitlebar(Boolean(aa.custom_titlebar));
+      setSplitPct(aa.transcript_split ?? 60);
       window.electronAPI.setOpacity(aa.window_opacity ?? 1);
     });
   }, [settingsOpen]); // re-apply after settings close
@@ -84,6 +88,26 @@ function MainLayout() {
     const next = !chatVisible;
     setChatVisible(next);
     window.electronAPI.setPreferences({ chat_panel_visible: next } as never);
+  };
+
+  const startDividerDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => {
+      const rect = panelsRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return;
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      setSplitPct(Math.min(80, Math.max(20, pct)));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setSplitPct((p) => {
+        window.electronAPI.setPreferences({ transcript_split: p } as never);
+        return p;
+      });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   };
 
   return (
@@ -121,13 +145,26 @@ function MainLayout() {
         </div>
       )}
 
-      {/* Main panels */}
-      <div
-        className="flex-1 grid overflow-hidden"
-        style={{ gridTemplateColumns: chatVisible ? '60fr 40fr' : '1fr' }}
-      >
-        <TranscriptPanel />
-        {chatVisible && <AIChatPanel />}
+      {/* Main panels — draggable split */}
+      <div ref={panelsRef} className="flex-1 flex overflow-hidden">
+        <div
+          className="h-full overflow-hidden"
+          style={{ width: chatVisible ? `${splitPct}%` : '100%' }}
+        >
+          <TranscriptPanel />
+        </div>
+        {chatVisible && (
+          <>
+            <div
+              onMouseDown={startDividerDrag}
+              title="Drag to resize"
+              className="w-1.5 flex-shrink-0 cursor-col-resize bg-gray-700 hover:bg-blue-500 transition-colors"
+            />
+            <div className="h-full overflow-hidden flex-1">
+              <AIChatPanel />
+            </div>
+          </>
+        )}
       </div>
 
       {/* Auto-answer suggested-answer band */}
