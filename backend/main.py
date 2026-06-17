@@ -194,6 +194,9 @@ class PrefsUpdate(BaseModel):
     always_on_top: bool | None = None
     transcript_split: float | None = None
     transcript_visible: bool | None = None
+    transcription_engine: str | None = None
+    cloud_provider: str | None = None
+    local_transcribe_mode: str | None = None
 
 
 @app.put("/api/preferences")
