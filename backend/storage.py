@@ -43,6 +43,9 @@ class UserPreferences:
     custom_titlebar: bool = True
     window_opacity: float = 1.0
     always_on_top: bool = False
+    transcription_engine: Literal["local", "cloud"] = "local"
+    cloud_provider: str = "deepgram"
+    local_transcribe_mode: Literal["streaming", "legacy"] = "streaming"
     transcript_split: float = 60.0  # % width of the transcript panel
     transcript_visible: bool = False
 
