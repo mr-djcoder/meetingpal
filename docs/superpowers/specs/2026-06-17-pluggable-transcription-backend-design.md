@@ -194,15 +194,17 @@ its own future spec.
 
 - Deepgram key in **keytar** under account `deepgram-api-key` (same pattern as
   `anthropic-api-key`, `gemini-api-key`).
-- New IPC + sidecar endpoint `POST /api/key/deepgram`; key is synced to the sidecar on
-  startup (transcription is server-side, like the auto-answer keys).
+- New IPC + sidecar endpoint `POST /api/key/deepgram`; key is synced to the sidecar **on
+  save and on startup** (transcription is server-side, like the auto-answer keys). Syncing
+  only on startup would strand a key pasted mid-session.
 - Key is never written to disk, logs, or frontend state.
 
 ## Settings UI
 
 In `src/components/Settings.tsx`:
 
-- **Engine** radio: `Local` / `Cloud`.
+- **Engine** radio: `Local` / `Cloud`. **Disabled while recording** (engine is fixed for a
+  session); shows a "applies on next start" hint so a change never looks broken.
 - When **Local** selected → read-only info line:
   `Engine: Local · Device: CPU` (or `GPU (CUDA)`) · `Model: base.en`.
   Device/model come from a sidecar status field.
@@ -250,6 +252,23 @@ In `src/components/Settings.tsx`:
 - **Device-info detector:** returns `"cpu"` / `"cuda"` correctly for the status readout.
 - **Privacy gate:** cloud engine cannot be enabled without a saved key + acknowledged
   warning.
+
+## Risks, dependencies & remaining notes
+
+- **Deepgram concurrency (resolved):** pay-as-you-go allows up to **50 concurrent WebSocket
+  streaming connections**, so the two-connection design (mic + loopback) is well within
+  limits. On a `429 Too Many Requests`, surface the standard recoverable cloud error.
+- **Worker backpressure (local):** enabling `word_timestamps` on the streaming path plus two
+  sources raises per-call cost. The single Whisper worker must not let its queue grow
+  unbounded — when behind, **drop partial-trigger frames** (skip a live partial) but never
+  drop audio needed to finalize an utterance. Bound the queue and measure.
+- **Dependency `deepgram-sdk`:** pin in `requirements.txt`; it pulls async transport deps
+  (websockets/aiohttp). Verify the **PyInstaller bundle actually imports it** at runtime
+  (add hidden-imports if the build misses them). Cloud is unusable if the packaged `.exe`
+  can't load the SDK.
+- **Streamed-minutes counter (future):** two continuous cloud connections bill ~2× meeting
+  duration; a visible usage/credit counter would prevent silent credit burn. Out of scope
+  for v1, noted for a follow-up.
 
 ## Out of scope
 
