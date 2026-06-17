@@ -58,6 +58,7 @@ class DeepgramStreamMapper:
 
 
 import asyncio
+import inspect
 import threading
 from collections import deque
 
@@ -119,7 +120,10 @@ class DeepgramBackend:
         while q and conn is not None:
             data = q.popleft()
             try:
-                await conn.send(data)
+                # Real deepgram-sdk conn.send() is synchronous; test fakes are async.
+                res = conn.send(data)
+                if inspect.isawaitable(res):
+                    await res
             except Exception as e:
                 self._on_error(f"Cloud send failed ({source}): {e}")
                 return
@@ -128,7 +132,10 @@ class DeepgramBackend:
         async def _close():
             for c in self._conns.values():
                 try:
-                    await c.finish()
+                    # Real conn.finish() is synchronous; test fakes are async.
+                    res = c.finish()
+                    if inspect.isawaitable(res):
+                        await res
                 except Exception:
                     pass
         if self._thread.is_alive():

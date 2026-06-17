@@ -63,3 +63,29 @@ def test_backend_feeds_pcm_and_reports_error(monkeypatch):
     b.stop()
     assert len(sent["mic"]) >= 1
     assert isinstance(sent["mic"][0], (bytes, bytearray))
+
+
+def test_backend_works_with_synchronous_connection():
+    """Real deepgram-sdk conn.send/finish are sync; _drain/_close must not await them."""
+    import time
+    import numpy as np
+    from datetime import datetime
+    from backend.deepgram_backend import DeepgramBackend
+
+    sent = {"mic": [], "loopback": []}
+
+    class SyncConn:
+        def __init__(self, source): self.source = source
+        def send(self, data): sent[self.source].append(data)   # synchronous
+        def finish(self): pass                                  # synchronous
+
+    b = DeepgramBackend(
+        api_key="k", session_id="s", emit=lambda seg: None,
+        on_error=lambda e: None, conn_factory=lambda source, on_message, on_error: SyncConn(source),
+    )
+    b.start("s", datetime.now())
+    b.feed("loopback", np.ones(8000, dtype=np.float32) * 0.1, 0.2)
+    time.sleep(0.2)  # let the loop thread drain
+    b.stop()
+    assert len(sent["loopback"]) >= 1
+    assert isinstance(sent["loopback"][0], (bytes, bytearray))
