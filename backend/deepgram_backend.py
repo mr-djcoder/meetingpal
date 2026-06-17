@@ -95,6 +95,9 @@ class DeepgramBackend:
                 self._conns[source] = fut.result(timeout=10)
             except Exception as e:  # connection failure → inform, no fallback
                 self._on_error(f"Cloud transcription failed to connect ({source}): {e}")
+        if not self._conns:  # neither source connected — surface a clear, actionable error
+            self._on_error("Cloud transcription unavailable — switch to Local in Settings "
+                           "or check your connection / Deepgram key.")
 
     async def _open(self, source: str):
         def on_message(result: dict):
@@ -145,6 +148,7 @@ class DeepgramBackend:
             except Exception:
                 pass
             self._loop.call_soon_threadsafe(self._loop.stop)
+            self._thread.join(timeout=2)  # don't leak the loop thread
 
     def ready(self) -> bool:
         return True

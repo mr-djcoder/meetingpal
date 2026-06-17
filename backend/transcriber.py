@@ -55,6 +55,14 @@ class WhisperTranscriber:
     def device(self) -> str:
         return self._device
 
+    def set_transcribe_mode(self, mode: str) -> None:
+        """Swap the assembler class. Takes effect on the next session start — cheap,
+        no model reload — so the Settings kill-switch applies without an app restart."""
+        self._assembler_cls = (
+            StreamingUtteranceAssembler if mode == "streaming"
+            else LegacyUtteranceAssembler
+        )
+
     def load_model(self, name: str | None = None) -> None:
         """Load (or reload) the Whisper model. Blocks until ready."""
         if name:

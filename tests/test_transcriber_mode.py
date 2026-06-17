@@ -12,3 +12,12 @@ def test_assembler_class_by_mode():
 def test_device_defaults_to_unknown_before_load():
     t = WhisperTranscriber(model_name="base.en")
     assert t.device in ("cpu", "cuda", "unknown")
+
+
+def test_set_transcribe_mode_swaps_assembler():
+    t = WhisperTranscriber(model_name="base.en", transcribe_mode="streaming")
+    assert t._assembler_cls.__name__ == "StreamingUtteranceAssembler"
+    t.set_transcribe_mode("legacy")
+    assert t._assembler_cls.__name__ == "LegacyUtteranceAssembler"
+    t.set_transcribe_mode("streaming")
+    assert t._assembler_cls.__name__ == "StreamingUtteranceAssembler"

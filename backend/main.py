@@ -215,6 +215,10 @@ def update_preferences(body: PrefsUpdate):
     if "whisper_model" in data and data["whisper_model"] != old_model and transcriber and event_loop:
         event_loop.run_in_executor(None, transcriber.load_model, prefs.whisper_model)
         _flush(f"[prefs] reloading Whisper model: {prefs.whisper_model}")
+    # Swap the local assembler (streaming/legacy kill-switch) — cheap, applies next session.
+    if "local_transcribe_mode" in data and transcriber:
+        transcriber.set_transcribe_mode(prefs.local_transcribe_mode)
+        _flush(f"[prefs] local transcribe mode: {prefs.local_transcribe_mode}")
     return asdict(prefs)
 
 

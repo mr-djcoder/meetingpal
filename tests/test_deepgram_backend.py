@@ -65,6 +65,25 @@ def test_backend_feeds_pcm_and_reports_error(monkeypatch):
     assert isinstance(sent["mic"][0], (bytes, bytearray))
 
 
+def test_backend_reports_error_when_no_connection_opens():
+    """Both connections failing → a clear, actionable error is surfaced (no fallback)."""
+    from datetime import datetime
+    from backend.deepgram_backend import DeepgramBackend
+
+    errors = []
+
+    def failing_open(source, on_message, on_error):
+        raise RuntimeError("boom")
+
+    b = DeepgramBackend(
+        api_key="k", session_id="s", emit=lambda seg: None,
+        on_error=errors.append, conn_factory=failing_open,
+    )
+    b.start("s", datetime.now())
+    b.stop()
+    assert any("switch to Local" in e for e in errors)
+
+
 def test_backend_works_with_synchronous_connection():
     """Real deepgram-sdk conn.send/finish are sync; _drain/_close must not await them."""
     import time
