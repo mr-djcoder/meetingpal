@@ -15,11 +15,9 @@ function formatDuration(seconds: number): string {
 
 export function TopBar({ onSettingsOpen, chatVisible, onToggleChat }: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
-  const [hasKey, setHasKey] = useState(false);
   const [autoAnswer, setAutoAnswer] = useState(false);
 
   useEffect(() => {
-    window.electronAPI.hasApiKey().then(setHasKey).catch(() => setHasKey(false));
     window.electronAPI
       .getPreferences()
       .then((p) => setAutoAnswer(Boolean((p as unknown as { auto_answer_enabled?: boolean }).auto_answer_enabled)))
@@ -82,15 +80,6 @@ export function TopBar({ onSettingsOpen, chatVisible, onToggleChat }: Props) {
         >
           AI Auto
         </button>
-
-        {/* API key status */}
-        <div className="flex items-center gap-1.5">
-          <div
-            className={`w-2 h-2 rounded-full ${hasKey ? 'bg-green-500' : 'bg-red-500'}`}
-            title={hasKey ? 'API key set' : 'No API key'}
-          />
-          <span className="text-xs text-gray-400">{hasKey ? 'API key set' : 'No API key'}</span>
-        </div>
 
         {/* Collapse AI chat sidebar */}
         <button

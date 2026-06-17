@@ -40,6 +40,7 @@ export function Settings({ isOpen, onClose }: Props) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
+  const [hasKey, setHasKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [geminiKey, setGeminiKey] = useState('');
   const [geminiKeySaved, setGeminiKeySaved] = useState(false);
@@ -56,6 +57,7 @@ export function Settings({ isOpen, onClose }: Props) {
       setDraft({});
       setDevices((d as { devices: AudioDevice[] }).devices);
     });
+    window.electronAPI.hasApiKey().then(setHasKey).catch(() => setHasKey(false));
     window.electronAPI.hasGeminiKey().then(setHasGemini).catch(() => setHasGemini(false));
     window.electronAPI
       .getGeminiModels()
@@ -84,6 +86,7 @@ export function Settings({ isOpen, onClose }: Props) {
     if (!apiKey.trim()) return;
     await window.electronAPI.setApiKey(apiKey.trim());
     setApiKey('');
+    setHasKey(true);
     setKeySaved(true);
     setTimeout(() => setKeySaved(false), 2000);
   };
@@ -117,6 +120,10 @@ export function Settings({ isOpen, onClose }: Props) {
         <div className="px-6 py-5 space-y-6">
           {/* API Key */}
           <Section title="API Key">
+            <div className="flex items-center gap-1.5 mb-2">
+              <div className={`w-2 h-2 rounded-full ${hasKey ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className="text-xs text-gray-400">{hasKey ? 'API key set' : 'No API key'}</span>
+            </div>
             <div className="flex gap-2">
               <input
                 type="password"
