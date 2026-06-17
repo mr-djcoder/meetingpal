@@ -22,7 +22,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.audio_capture import AudioCapture, enumerate_devices
+from backend.auto_answer import AutoAnswerOrchestrator
 from backend.claude_client import ClaudeClient
+from backend.gemini_client import GeminiClient, list_gemini_models
 from backend.models import ChatMessage, RecordingSession, TranscriptSegment
 from backend.storage import UserPreferences, load_preferences, save_preferences, save_session
 from backend.transcriber import WhisperTranscriber
@@ -34,8 +36,13 @@ audio_capture: AudioCapture | None = None
 active_session: RecordingSession | None = None
 connected_websockets: set[WebSocket] = set()
 prefs: UserPreferences = UserPreferences()
-_api_key_memory: str | None = None  # held in-process only, never on disk
+_api_key_memory: str | None = None  # Claude key, held in-process only, never on disk
+_gemini_key_memory: str | None = None  # Gemini key, in-process only
 event_loop: asyncio.AbstractEventLoop | None = None  # captured at startup for cross-thread scheduling
+
+_claude_client = ClaudeClient()
+_gemini_client = GeminiClient()
+auto_answer: AutoAnswerOrchestrator | None = None  # created at startup
 
 SIDECAR_VERSION = "1.0.0"
 
@@ -45,8 +52,9 @@ SIDECAR_VERSION = "1.0.0"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global transcriber, prefs, event_loop
+    global transcriber, prefs, event_loop, auto_answer
     event_loop = asyncio.get_running_loop()
+    auto_answer = AutoAnswerOrchestrator(_broadcast)
     prefs = load_preferences()
     transcriber = WhisperTranscriber(
         model_name=prefs.whisper_model,
@@ -100,6 +108,25 @@ def _on_transcript_segment(seg: TranscriptSegment) -> None:
     event_loop.call_soon_threadsafe(
         lambda: asyncio.ensure_future(_broadcast(seg.to_ws_dict()))
     )
+    # Auto-answer: on a finalized question from the other party, the orchestrator
+    # decides whether to fire (enabled / Them / is-question / min-interval).
+    if auto_answer is not None and prefs.auto_answer_enabled and active_session is not None:
+        segments_snapshot = list(active_session.segments)
+        history_snapshot = list(active_session.chat_messages)
+        event_loop.call_soon_threadsafe(
+            lambda: asyncio.ensure_future(
+                auto_answer.maybe_answer(
+                    segment=seg,
+                    prefs=prefs,
+                    claude_key=_api_key_memory,
+                    gemini_key=_gemini_key_memory,
+                    claude_client=_claude_client,
+                    gemini_client=_gemini_client,
+                    segments=segments_snapshot,
+                    history=history_snapshot,
+                )
+            )
+        )
 
 
 def _require_api_key(request: Request) -> str:
@@ -184,6 +211,23 @@ def store_key(body: KeyBody):
     _api_key_memory = body.api_key
     _flush("[key] API key stored in memory")
     return {"stored": True}
+
+
+@app.post("/api/key/gemini")
+def store_gemini_key(body: KeyBody):
+    global _gemini_key_memory
+    _gemini_key_memory = body.api_key
+    _flush("[key] Gemini API key stored in memory")
+    return {"stored": True}
+
+
+@app.get("/api/gemini/models")
+async def gemini_models():
+    """List Gemini models for the picker; falls back to a static set without a key."""
+    if not _gemini_key_memory:
+        from backend.gemini_client import FALLBACK_GEMINI_MODELS
+        return {"models": list(FALLBACK_GEMINI_MODELS)}
+    return {"models": await list_gemini_models(_gemini_key_memory)}
 
 
 # ── Session ───────────────────────────────────────────────────────────────────
