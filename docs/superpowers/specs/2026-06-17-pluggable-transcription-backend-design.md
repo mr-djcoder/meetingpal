@@ -91,6 +91,26 @@ endpointing on, diarize off, model `nova-2` or newer) → Deepgram JSON events m
 - one `id` per utterance (new uuid at utterance start, reused across that utterance's
   interims and final), matching how local segments upsert in the store.
 
+### Cloud streaming details
+
+- **Continuous (ungated) audio.** The cloud path sends *raw continuous* frames to Deepgram
+  — **not** Silero-VAD-gated. Deepgram does its own VAD/endpointing; gating would break its
+  end-of-turn detection and let the WS idle-time-out (~10–12s) during quiet. Silero stays on
+  the local path only. Send a Deepgram `KeepAlive` during long silence if no audio is
+  flowing, and a `Finalize`/`CloseStream` on stop.
+  - **Cost consequence:** two continuous connections bill ~full wall-clock audio (silence
+    included), i.e. roughly 2× meeting duration. Acceptable for v1; a streamed-minutes
+    counter is a future add (see Notes).
+- **Audio format.** Capture frames are float32 numpy; Deepgram `linear16` wants int16 PCM
+  bytes. Convert explicitly (clip to [-1, 1], scale by 32767, cast int16, `.tobytes()`).
+  Unit-tested independently.
+- **Async-in-thread bridge.** The Deepgram SDK is asyncio; capture is callback/thread-based.
+  `DeepgramBackend` runs a **dedicated asyncio loop in its own thread**; `feed()` pushes PCM
+  across with `run_coroutine_threadsafe` into a **bounded** per-connection queue. If a queue
+  is full (network stall), drop oldest frames rather than block the capture callback.
+- **Auth in header.** The Deepgram key is sent via the Authorization header, **never** in
+  the WS URL/query string, so it cannot leak into logs.
+
 ## Local streaming fix (LocalAgreement-2)
 
 Replaces the re-transcribe-whole-buffer logic in `backend/utterance.py`.
@@ -198,9 +218,14 @@ In `src/components/Settings.tsx`:
 
 - **Cloud, no key:** session start blocked with a clear message. Never silently stream
   audio to nowhere.
-- **Deepgram WS error/disconnect:** a few reconnect attempts; if still failing, surface a
-  recoverable sidecar error **and auto-fall back to `LocalBackend`** for the remainder of
-  the session so transcription never just dies. The fallback is shown in the error banner.
+- **Deepgram WS error/disconnect:** a few reconnect attempts with backoff (on reconnect,
+  finalize any open utterance and start a fresh id). If still failing, **no auto-fallback** —
+  surface a clear, recoverable error ("Cloud transcription disconnected — switch to Local in
+  Settings or check your connection / Deepgram key") and stop cloud transcription. Audio
+  capture is not silently rerouted; the user decides whether to stop and switch engines.
+  Rationale: auto-fallback would require pre-loading or cold-loading the local Whisper model
+  (and could itself fail if the model was never downloaded), adding hidden latency and
+  failure surface. Informing the user is simpler and predictable.
 - **Local:** unchanged — existing CUDA→CPU model fallback stays.
 
 ## Testing
@@ -218,6 +243,10 @@ In `src/components/Settings.tsx`:
 - **DeepgramBackend:** **mock WebSocket**, feed canned Deepgram JSON events, assert
   `TranscriptSegment` mapping (speaker by source, interim→partial, final→final, text,
   stable id per utterance). No live API in unit tests.
+- **PCM conversion:** float32→int16 conversion is correct (scaling, clipping, byte order),
+  tested standalone.
+- **WS failure path:** simulated disconnect → reconnect attempts then a recoverable error
+  is emitted and cloud transcription stops (no fallback, no silent reroute).
 - **Device-info detector:** returns `"cpu"` / `"cuda"` correctly for the status readout.
 - **Privacy gate:** cloud engine cannot be enabled without a saved key + acknowledged
   warning.
