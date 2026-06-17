@@ -42,6 +42,7 @@ class UserPreferences:
     chat_panel_visible: bool = True
     custom_titlebar: bool = True
     window_opacity: float = 1.0
+    always_on_top: bool = False
     transcript_split: float = 60.0  # % width of the transcript panel
     transcript_visible: bool = False
 

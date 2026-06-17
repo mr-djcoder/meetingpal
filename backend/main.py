@@ -191,6 +191,7 @@ class PrefsUpdate(BaseModel):
     chat_panel_visible: bool | None = None
     custom_titlebar: bool | None = None
     window_opacity: float | None = None
+    always_on_top: bool | None = None
     transcript_split: float | None = None
     transcript_visible: bool | None = None
 

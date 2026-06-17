@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   windowClose: () => ipcRenderer.invoke('window-close'),
   applyTitlebar: (custom: boolean) => ipcRenderer.invoke('apply-titlebar', custom),
   setOpacity: (value: number) => ipcRenderer.invoke('set-opacity', value),
+  setAlwaysOnTop: (value: boolean) => ipcRenderer.invoke('set-always-on-top', value),
 
   // Export
   copyTranscript: (sessionId: string) => ipcRenderer.invoke('copy-transcript', sessionId),

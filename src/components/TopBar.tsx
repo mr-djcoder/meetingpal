@@ -26,13 +26,20 @@ export function TopBar({
 }: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
   const [autoAnswer, setAutoAnswer] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const [narrow, setNarrow] = useState(false);
 
   useEffect(() => {
     window.electronAPI
       .getPreferences()
-      .then((p) => setAutoAnswer(Boolean((p as unknown as { auto_answer_enabled?: boolean }).auto_answer_enabled)))
-      .catch(() => { /* default off */ });
+      .then((p) => {
+        const prefs = p as unknown as { auto_answer_enabled?: boolean; always_on_top?: boolean };
+        setAutoAnswer(Boolean(prefs.auto_answer_enabled));
+        const top = Boolean(prefs.always_on_top);
+        setPinned(top);
+        window.electronAPI.setAlwaysOnTop(top); // restore OS window state
+      })
+      .catch(() => { /* defaults */ });
   }, []);
 
   // Collapse labels to icons on a narrow window.
@@ -47,6 +54,13 @@ export function TopBar({
     const next = !autoAnswer;
     setAutoAnswer(next);
     await window.electronAPI.setPreferences({ auto_answer_enabled: next } as never);
+  };
+
+  const togglePin = async () => {
+    const next = !pinned;
+    setPinned(next);
+    await window.electronAPI.setAlwaysOnTop(next);
+    await window.electronAPI.setPreferences({ always_on_top: next } as never);
   };
 
   const handleToggle = async () => {
@@ -103,6 +117,19 @@ export function TopBar({
 
       {/* Right controls */}
       <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Always-on-top pin */}
+        <button
+          onClick={togglePin}
+          title={pinned ? 'Unpin — allow other windows on top' : 'Pin on top of all windows'}
+          className={`p-1.5 rounded transition-colors ${
+            pinned ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'
+          }`}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4h6l-1 6 3 3v2h-5v5l-1 1-1-1v-5H4v-2l3-3-1-6z" />
+          </svg>
+        </button>
+
         {/* Auto-answer toggle */}
         <button
           onClick={toggleAutoAnswer}

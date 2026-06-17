@@ -47,6 +47,7 @@ interface UserPreferences {
   chat_panel_visible: boolean;
   custom_titlebar: boolean;
   window_opacity: number;
+  always_on_top: boolean;
   transcript_split: number;
   transcript_visible: boolean;
 }
@@ -99,6 +100,7 @@ interface ElectronAPI {
   windowClose(): Promise<void>;
   applyTitlebar(custom: boolean): Promise<void>;
   setOpacity(value: number): Promise<number>;
+  setAlwaysOnTop(value: boolean): Promise<boolean>;
   copyTranscript(sessionId: string): Promise<void>;
   exportTranscript(sessionId: string, format: 'txt' | 'md'): Promise<string | null>;
 }

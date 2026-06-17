@@ -293,6 +293,11 @@ ipcMain.handle('set-opacity', (_e, value: number) => {
   return clamped;
 });
 
+ipcMain.handle('set-always-on-top', (_e, value: boolean) => {
+  mainWindow?.setAlwaysOnTop(Boolean(value));
+  return Boolean(value);
+});
+
 // Apply the frame setting by recreating the window in-place. `frame` is fixed at
 // creation, but a full app.relaunch() would kill the Vite dev server in dev and
 // leave a blank window — recreating keeps the dev server (and sidecar) alive.
