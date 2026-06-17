@@ -17,7 +17,17 @@ interface UserPreferences {
   font_size: number;
   theme: 'dark' | 'light';
   onboarding_completed: boolean;
+  auto_answer_enabled: boolean;
+  auto_answer_prompt: string;
+  auto_answer_provider: string;
+  auto_answer_model: string;
 }
+
+const CLAUDE_MODELS = [
+  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 — fast' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
+];
 
 interface Props {
   isOpen: boolean;
@@ -31,6 +41,10 @@ export function Settings({ isOpen, onClose }: Props) {
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [geminiKey, setGeminiKey] = useState('');
+  const [geminiKeySaved, setGeminiKeySaved] = useState(false);
+  const [hasGemini, setHasGemini] = useState(false);
+  const [geminiModels, setGeminiModels] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -42,6 +56,11 @@ export function Settings({ isOpen, onClose }: Props) {
       setDraft({});
       setDevices((d as { devices: AudioDevice[] }).devices);
     });
+    window.electronAPI.hasGeminiKey().then(setHasGemini).catch(() => setHasGemini(false));
+    window.electronAPI
+      .getGeminiModels()
+      .then((r) => setGeminiModels(r.models))
+      .catch(() => setGeminiModels([]));
   }, [isOpen]);
 
   if (!isOpen || !prefs) return null;
@@ -67,6 +86,16 @@ export function Settings({ isOpen, onClose }: Props) {
     setApiKey('');
     setKeySaved(true);
     setTimeout(() => setKeySaved(false), 2000);
+  };
+
+  const handleSaveGeminiKey = async () => {
+    if (!geminiKey.trim()) return;
+    await window.electronAPI.setGeminiKey(geminiKey.trim());
+    setGeminiKey('');
+    setHasGemini(true);
+    setGeminiKeySaved(true);
+    setTimeout(() => setGeminiKeySaved(false), 2000);
+    window.electronAPI.getGeminiModels().then((r) => setGeminiModels(r.models)).catch(() => {});
   };
 
   const mics = devices.filter((d) => d.device_type === 'microphone');
@@ -129,6 +158,100 @@ export function Settings({ isOpen, onClose }: Props) {
                 { value: 'claude-opus-4-6', label: 'Claude Opus (most capable, slower)' },
               ]}
             />
+          </Section>
+
+          {/* Auto-Answer */}
+          <Section title="Auto-Answer (suggested replies)">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-300">Enable auto-answer</span>
+                <button
+                  onClick={() => update({ auto_answer_enabled: !merged.auto_answer_enabled })}
+                  className={`relative inline-flex h-5 w-9 rounded-full transition-colors ${
+                    merged.auto_answer_enabled ? 'bg-blue-600' : 'bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                      merged.auto_answer_enabled ? 'translate-x-4' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Prompt</label>
+                <textarea
+                  value={merged.auto_answer_prompt}
+                  onChange={(e) => update({ auto_answer_prompt: e.target.value })}
+                  rows={3}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none resize-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Provider</label>
+                <select
+                  value={merged.auto_answer_provider}
+                  onChange={(e) => {
+                    const p = e.target.value;
+                    const model =
+                      p === 'gemini' ? geminiModels[0] ?? 'gemini-3.5-flash' : 'claude-haiku-4-5-20251001';
+                    update({ auto_answer_provider: p, auto_answer_model: model });
+                  }}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                >
+                  <option value="claude">Claude (Anthropic)</option>
+                  <option value="gemini">Gemini (Google)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Model</label>
+                <select
+                  value={merged.auto_answer_model}
+                  onChange={(e) => update({ auto_answer_model: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                >
+                  {merged.auto_answer_provider === 'gemini'
+                    ? geminiModels.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))
+                    : CLAUDE_MODELS.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                </select>
+              </div>
+              {merged.auto_answer_provider === 'gemini' && (
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">
+                    Gemini API Key{' '}
+                    {hasGemini ? (
+                      <span className="text-green-400">(set)</span>
+                    ) : (
+                      <span className="text-red-400">(not set)</span>
+                    )}
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={geminiKey}
+                      onChange={(e) => setGeminiKey(e.target.value)}
+                      placeholder="AIza… (transcript is sent to Google when Gemini is selected)"
+                      className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                    />
+                    <button
+                      onClick={handleSaveGeminiKey}
+                      disabled={!geminiKey.trim()}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                    >
+                      {geminiKeySaved ? 'Saved!' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </Section>
 
           {/* Audio Devices */}

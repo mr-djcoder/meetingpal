@@ -14,10 +14,21 @@ function formatDuration(seconds: number): string {
 export function TopBar({ onSettingsOpen }: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
   const [hasKey, setHasKey] = useState(false);
+  const [autoAnswer, setAutoAnswer] = useState(false);
 
   useEffect(() => {
     window.electronAPI.hasApiKey().then(setHasKey).catch(() => setHasKey(false));
+    window.electronAPI
+      .getPreferences()
+      .then((p) => setAutoAnswer(Boolean((p as unknown as { auto_answer_enabled?: boolean }).auto_answer_enabled)))
+      .catch(() => { /* default off */ });
   }, []);
+
+  const toggleAutoAnswer = async () => {
+    const next = !autoAnswer;
+    setAutoAnswer(next);
+    await window.electronAPI.setPreferences({ auto_answer_enabled: next } as never);
+  };
 
   const handleToggle = async () => {
     if (isRecording) {
@@ -59,6 +70,17 @@ export function TopBar({ onSettingsOpen }: Props) {
 
       {/* Right side */}
       <div className="flex items-center gap-3">
+        {/* Auto-answer quick toggle */}
+        <button
+          onClick={toggleAutoAnswer}
+          title={autoAnswer ? 'Auto-answer ON' : 'Auto-answer OFF'}
+          className={`text-xs px-2 py-1 rounded font-medium transition-colors ${
+            autoAnswer ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'
+          }`}
+        >
+          AI Auto
+        </button>
+
         {/* API key status */}
         <div className="flex items-center gap-1.5">
           <div

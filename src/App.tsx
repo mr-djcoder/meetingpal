@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AIChatPanel } from './components/AIChatPanel';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { Settings } from './components/Settings';
+import { SuggestedAnswerPanel } from './components/SuggestedAnswerPanel';
 import { TopBar } from './components/TopBar';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -24,6 +25,7 @@ function MainLayout() {
   const audioLevels = useWebSocket();
   const { isRecording } = useTranscriptStore();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [autoAnswerOn, setAutoAnswerOn] = useState(false);
   const [errorBanner, setErrorBanner] = useState<SidecarError | null>(null);
   const [errorModal, setErrorModal] = useState<SidecarError | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
@@ -65,6 +67,8 @@ function MainLayout() {
       document.documentElement.classList.toggle('dark', p.theme === 'dark');
       document.documentElement.classList.toggle('light', p.theme === 'light');
       document.documentElement.style.setProperty('--transcript-font-size', `${p.font_size}px`);
+      const aa = prefs as unknown as { auto_answer_enabled?: boolean };
+      setAutoAnswerOn(Boolean(aa.auto_answer_enabled));
     });
   }, [settingsOpen]); // re-apply after settings close
 
@@ -102,6 +106,9 @@ function MainLayout() {
         <TranscriptPanel />
         <AIChatPanel />
       </div>
+
+      {/* Auto-answer suggested-answer band */}
+      {autoAnswerOn && <SuggestedAnswerPanel />}
 
       {/* Audio visualizer — shown when recording */}
       {isRecording && (
