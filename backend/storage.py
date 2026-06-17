@@ -24,7 +24,7 @@ DEFAULT_SAVE_PATH = str(
 @dataclass
 class UserPreferences:
     whisper_model: Literal["base.en", "small.en", "medium.en"] = "base.en"
-    claude_model: Literal["claude-sonnet-4-6", "claude-opus-4-6"] = "claude-sonnet-4-6"
+    claude_model: str = "claude-sonnet-4-6"  # widened — new Claude IDs (haiku-4-5, opus-4-8)
     mic_device_index: int | None = None
     loopback_device_index: int | None = None
     auto_save: bool = True

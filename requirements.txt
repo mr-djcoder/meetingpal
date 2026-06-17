@@ -1,15 +1,16 @@
+# Python 3.13. torch/torchaudio resolve to CPU wheels on Windows PyPI.
+# Versions reflect the working installed set (the old 3.11-era pins had no 3.13 wheels).
 pyaudiowpatch==0.2.12.8
-faster-whisper==1.0.3
-silero-vad==5.1.2
-speechbrain==1.0.0
-scikit-learn==1.5.0
-scipy==1.13.0
-numpy==1.26.4
-anthropic==0.30.0
-fastapi==0.111.0
-uvicorn[standard]==0.30.1
+faster-whisper==1.2.1
+silero-vad==6.2.1
+scikit-learn==1.8.0
+scipy==1.17.1
+numpy==2.4.3
+anthropic==0.86.0
+fastapi==0.135.2
+uvicorn[standard]==0.42.0
 requests>=2.31.0
-torch==2.3.0
-torchaudio==2.3.0
-pytest==8.2.0
+torch==2.11.0
+torchaudio==2.11.0
 google-genai==2.8.0
+pytest==8.2.0
