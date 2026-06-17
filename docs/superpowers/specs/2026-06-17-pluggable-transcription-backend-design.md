@@ -108,6 +108,27 @@ win on GPU (per-audio cost dominates) and on long turns / real speech.
 
 DeepgramBackend is unaffected — Deepgram streams incrementally on its own.
 
+## Overlapping speech / crosstalk
+
+Splitting by source (mic→`You`, loopback→`Them`) over two independent Deepgram
+connections handles people talking over each other **natively**: each connection has its
+own decoder, so simultaneous speech produces a `You` final and a `Them` final in parallel,
+with overlapping `session_offset_seconds`. The renderer shows both lines, ordered by
+offset. This is strictly better than a single mixed stream + acoustic diarization, which
+would have to untangle overlapping voices into Speaker 0/1 — the case acoustic diarization
+handles worst.
+
+The real limitation is **acoustic bleed**: on speakers (not headphones), the mic physically
+picks up the other party's voice coming out of the speakers, so their words can be
+transcribed a second time as `You`. This is **not new to the cloud path** — the current
+local mic/loopback energy heuristic has the identical issue.
+
+Handling this round: **document it and recommend headphones.** Headphones eliminate the
+bleed entirely. No code work for bleed in this project.
+
+Future options (not in scope): a cross-source energy-dominance gate (suppress the quieter
+source's frames during clear overlap), or real acoustic echo cancellation on mic capture.
+
 ## Key storage
 
 - Deepgram key in **keytar** under account `deepgram-api-key` (same pattern as
