@@ -23,6 +23,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   hasGeminiKey: () => ipcRenderer.invoke('has-gemini-key'),
   getGeminiModels: () => ipcRenderer.invoke('get-gemini-models'),
 
+  // Deepgram key (cloud transcription)
+  setDeepgramKey: (key: string) => ipcRenderer.invoke('set-deepgram-key', key),
+  hasDeepgramKey: () => ipcRenderer.invoke('has-deepgram-key'),
+
+  // Engine status readout
+  getEngineStatus: () => ipcRenderer.invoke('get-engine-status'),
+
   // Real-time listeners — each returns a cleanup function
   onTranscriptSegment: (cb: (segment: unknown) => void) => {
     const handler = (_: Electron.IpcRendererEvent, segment: unknown) => cb(segment);

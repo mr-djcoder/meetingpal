@@ -6,6 +6,7 @@ import { SidecarManager } from './sidecar';
 const KEYTAR_SERVICE = 'MeetingPal';
 const KEYTAR_ACCOUNT = 'anthropic-api-key';
 const GEMINI_ACCOUNT = 'gemini-api-key';
+const DEEPGRAM_ACCOUNT = 'deepgram-api-key';
 const SIDECAR_PORT = 8001;
 const BASE_URL = `http://127.0.0.1:${SIDECAR_PORT}`;
 
@@ -223,6 +224,22 @@ ipcMain.handle('has-gemini-key', async () => {
 
 ipcMain.handle('get-gemini-models', () => apiRequest('GET', '/api/gemini/models'));
 
+ipcMain.handle('set-deepgram-key', async (_e, key: string) => {
+  await keytar.setPassword(KEYTAR_SERVICE, DEEPGRAM_ACCOUNT, key);
+  try {
+    await apiRequest('POST', '/api/key/deepgram', { api_key: key });
+  } catch {
+    // sidecar may not be ready yet; startup sync will retry
+  }
+});
+
+ipcMain.handle('has-deepgram-key', async () => {
+  const key = await keytar.getPassword(KEYTAR_SERVICE, DEEPGRAM_ACCOUNT);
+  return key !== null && key.length > 0;
+});
+
+ipcMain.handle('get-engine-status', () => apiRequest('GET', '/api/engine/status'));
+
 ipcMain.handle('copy-transcript', async (_e, sessionId: string) => {
   const data = await apiRequest<{ segments: Array<{ speaker: string; wall_clock_time: string; text: string }> }>(
     'GET',
@@ -321,6 +338,8 @@ async function syncKeysToSidecar(): Promise<void> {
     if (claude) await apiRequest('POST', '/api/key', { api_key: claude });
     const gemini = await keytar.getPassword(KEYTAR_SERVICE, GEMINI_ACCOUNT);
     if (gemini) await apiRequest('POST', '/api/key/gemini', { api_key: gemini });
+    const deepgram = await keytar.getPassword(KEYTAR_SERVICE, DEEPGRAM_ACCOUNT);
+    if (deepgram) await apiRequest('POST', '/api/key/deepgram', { api_key: deepgram });
   } catch (err) {
     console.error('Failed to sync keys to sidecar:', err);
   }
