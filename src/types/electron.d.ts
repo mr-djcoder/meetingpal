@@ -77,11 +77,18 @@ interface ElectronAPI {
   setPreferences(partial: Partial<UserPreferences>): Promise<UserPreferences>;
   setApiKey(key: string): Promise<void>;
   hasApiKey(): Promise<boolean>;
+  setGeminiKey(key: string): Promise<void>;
+  hasGeminiKey(): Promise<boolean>;
+  getGeminiModels(): Promise<{ models: string[] }>;
   onTranscriptSegment(cb: (segment: TranscriptSegment) => void): () => void;
   onAudioLevel(cb: (frame: AudioLevelFrame) => void): () => void;
   onAiToken(cb: (token: string) => void): () => void;
   onAiDone(cb: (summary: AiMessageSummary) => void): () => void;
   onError(cb: (error: SidecarError) => void): () => void;
+  onAutoAnswerStart(cb: (m: { question: string }) => void): () => void;
+  onAutoAnswerToken(cb: (m: { text: string }) => void): () => void;
+  onAutoAnswerDone(cb: (m: unknown) => void): () => void;
+  onAutoAnswerError(cb: (m: { message: string }) => void): () => void;
   copyTranscript(sessionId: string): Promise<void>;
   exportTranscript(sessionId: string, format: 'txt' | 'md'): Promise<string | null>;
 }

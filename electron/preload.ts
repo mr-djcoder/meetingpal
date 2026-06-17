@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setApiKey: (key: string) => ipcRenderer.invoke('set-api-key', key),
   hasApiKey: () => ipcRenderer.invoke('has-api-key'),
 
+  // Auto-answer: Gemini key + model list
+  setGeminiKey: (key: string) => ipcRenderer.invoke('set-gemini-key', key),
+  hasGeminiKey: () => ipcRenderer.invoke('has-gemini-key'),
+  getGeminiModels: () => ipcRenderer.invoke('get-gemini-models'),
+
   // Real-time listeners — each returns a cleanup function
   onTranscriptSegment: (cb: (segment: unknown) => void) => {
     const handler = (_: Electron.IpcRendererEvent, segment: unknown) => cb(segment);
@@ -43,6 +48,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_: Electron.IpcRendererEvent, error: unknown) => cb(error);
     ipcRenderer.on('sidecar-error', handler);
     return () => ipcRenderer.removeListener('sidecar-error', handler);
+  },
+  onAutoAnswerStart: (cb: (m: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, m: unknown) => cb(m);
+    ipcRenderer.on('auto-answer-start', handler);
+    return () => ipcRenderer.removeListener('auto-answer-start', handler);
+  },
+  onAutoAnswerToken: (cb: (m: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, m: unknown) => cb(m);
+    ipcRenderer.on('auto-answer-token', handler);
+    return () => ipcRenderer.removeListener('auto-answer-token', handler);
+  },
+  onAutoAnswerDone: (cb: (m: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, m: unknown) => cb(m);
+    ipcRenderer.on('auto-answer-done', handler);
+    return () => ipcRenderer.removeListener('auto-answer-done', handler);
+  },
+  onAutoAnswerError: (cb: (m: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, m: unknown) => cb(m);
+    ipcRenderer.on('auto-answer-error', handler);
+    return () => ipcRenderer.removeListener('auto-answer-error', handler);
   },
 
   // Export
