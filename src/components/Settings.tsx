@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranscriptStore } from '../store/transcriptStore';
 
 interface AudioDevice {
   index: number;
@@ -22,6 +23,9 @@ interface UserPreferences {
   auto_answer_provider: string;
   auto_answer_model: string;
   custom_titlebar: boolean;
+  transcription_engine: 'local' | 'cloud';
+  cloud_provider: string;
+  local_transcribe_mode: 'streaming' | 'legacy';
 }
 
 const CLAUDE_MODELS = [
@@ -48,6 +52,14 @@ export function Settings({ isOpen, onClose }: Props) {
   const [hasGemini, setHasGemini] = useState(false);
   const [geminiModels, setGeminiModels] = useState<string[]>([]);
 
+  // Transcription engine state
+  const isRecording = useTranscriptStore((s) => s.isRecording);
+  const [hasDgKey, setHasDgKey] = useState(false);
+  const [dgKeyInput, setDgKeyInput] = useState('');
+  const [cloudAck, setCloudAck] = useState(false);
+  const [dgKeySaved, setDgKeySaved] = useState(false);
+  const [engineStatus, setEngineStatus] = useState<{ device: string; model: string } | null>(null);
+
   useEffect(() => {
     if (!isOpen) return;
     Promise.all([
@@ -64,6 +76,11 @@ export function Settings({ isOpen, onClose }: Props) {
       .getGeminiModels()
       .then((r) => setGeminiModels(r.models))
       .catch(() => setGeminiModels([]));
+    window.electronAPI.hasDeepgramKey().then(setHasDgKey).catch(() => setHasDgKey(false));
+    window.electronAPI
+      .getEngineStatus()
+      .then((s) => setEngineStatus({ device: s.device, model: s.model }))
+      .catch(() => setEngineStatus(null));
   }, [isOpen]);
 
   if (!isOpen || !prefs) return null;
@@ -107,6 +124,15 @@ export function Settings({ isOpen, onClose }: Props) {
     setGeminiKeySaved(true);
     setTimeout(() => setGeminiKeySaved(false), 2000);
     window.electronAPI.getGeminiModels().then((r) => setGeminiModels(r.models)).catch(() => {});
+  };
+
+  const handleSaveDeepgramKey = async () => {
+    if (!dgKeyInput.trim()) return;
+    await window.electronAPI.setDeepgramKey(dgKeyInput.trim());
+    setDgKeyInput('');
+    setHasDgKey(true);
+    setDgKeySaved(true);
+    setTimeout(() => setDgKeySaved(false), 2000);
   };
 
   const mics = devices.filter((d) => d.device_type === 'microphone');
@@ -161,6 +187,95 @@ export function Settings({ isOpen, onClose }: Props) {
                 { value: 'medium.en', label: 'Medium (slower, more accurate)' },
               ]}
             />
+          </Section>
+
+          {/* Transcription Engine */}
+          <Section title="Transcription Engine">
+            <div className="space-y-3">
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="transcription_engine"
+                  checked={merged.transcription_engine === 'local'}
+                  disabled={isRecording}
+                  onChange={() => update({ transcription_engine: 'local' })}
+                  className="accent-blue-500"
+                />
+                <span className="text-sm text-gray-300">Local (private, on-device)</span>
+              </label>
+              <label className={`flex items-center gap-2.5 ${hasDgKey && cloudAck ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                <input
+                  type="radio"
+                  name="transcription_engine"
+                  checked={merged.transcription_engine === 'cloud'}
+                  disabled={isRecording || !(hasDgKey && (cloudAck || merged.transcription_engine === 'cloud'))}
+                  onChange={() => update({ transcription_engine: 'cloud' })}
+                  className="accent-blue-500"
+                />
+                <span className="text-sm text-gray-300">Cloud (Deepgram)</span>
+              </label>
+              {isRecording && (
+                <p className="text-xs text-gray-500">Applies on next recording start.</p>
+              )}
+
+              {merged.transcription_engine === 'local' && (
+                <div className="space-y-2 pt-1">
+                  {engineStatus && (
+                    <p className="text-xs text-gray-400">
+                      Engine: Local · Device: {engineStatus.device} · Model: {engineStatus.model}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">Transcription mode:</span>
+                    <select
+                      value={merged.local_transcribe_mode}
+                      disabled={isRecording}
+                      onChange={(e) =>
+                        update({ local_transcribe_mode: e.target.value as 'streaming' | 'legacy' })
+                      }
+                      className="bg-gray-800 text-white rounded-lg px-2 py-1 text-xs border border-gray-600 focus:border-blue-500 outline-none disabled:opacity-50"
+                    >
+                      <option value="streaming">Streaming (faster)</option>
+                      <option value="legacy">Legacy (stable)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {(merged.transcription_engine === 'cloud' || !hasDgKey) && (
+                <div className="space-y-2 border-t border-gray-800 pt-2">
+                  <p className="text-xs text-amber-400 flex gap-1.5">
+                    <span>⚠</span>
+                    <span>Cloud mode streams your meeting audio to Deepgram for transcription.</span>
+                  </p>
+                  <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={cloudAck}
+                      onChange={(e) => setCloudAck(e.target.checked)}
+                      className="accent-blue-500"
+                    />
+                    I understand audio will be sent to Deepgram.
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      placeholder={hasDgKey ? '(key already saved — enter new to replace)' : 'Deepgram API key'}
+                      value={dgKeyInput}
+                      onChange={(e) => setDgKeyInput(e.target.value)}
+                      className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                    />
+                    <button
+                      onClick={handleSaveDeepgramKey}
+                      disabled={!dgKeyInput.trim() || !cloudAck}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                    >
+                      {dgKeySaved ? 'Saved!' : 'Save key'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </Section>
 
           {/* Claude Model */}
