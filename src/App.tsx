@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AIChatPanel } from './components/AIChatPanel';
 import { AudioVisualizer } from './components/AudioVisualizer';
+import { CustomTitleBar } from './components/CustomTitleBar';
 import { Settings } from './components/Settings';
 import { SuggestedAnswerPanel } from './components/SuggestedAnswerPanel';
 import { TopBar } from './components/TopBar';
@@ -27,6 +28,7 @@ function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoAnswerOn, setAutoAnswerOn] = useState(false);
   const [chatVisible, setChatVisible] = useState(true);
+  const [customTitlebar, setCustomTitlebar] = useState(false);
   const [errorBanner, setErrorBanner] = useState<SidecarError | null>(null);
   const [errorModal, setErrorModal] = useState<SidecarError | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
@@ -68,9 +70,14 @@ function MainLayout() {
       document.documentElement.classList.toggle('dark', p.theme === 'dark');
       document.documentElement.classList.toggle('light', p.theme === 'light');
       document.documentElement.style.setProperty('--transcript-font-size', `${p.font_size}px`);
-      const aa = prefs as unknown as { auto_answer_enabled?: boolean; chat_panel_visible?: boolean };
+      const aa = prefs as unknown as {
+        auto_answer_enabled?: boolean;
+        chat_panel_visible?: boolean;
+        custom_titlebar?: boolean;
+      };
       setAutoAnswerOn(Boolean(aa.auto_answer_enabled));
       setChatVisible(aa.chat_panel_visible ?? true);
+      setCustomTitlebar(Boolean(aa.custom_titlebar));
     });
   }, [settingsOpen]); // re-apply after settings close
 
@@ -82,6 +89,7 @@ function MainLayout() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-gray-100 overflow-hidden">
+      {customTitlebar && <CustomTitleBar />}
       <TopBar
         onSettingsOpen={() => setSettingsOpen(true)}
         chatVisible={chatVisible}

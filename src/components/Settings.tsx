@@ -21,6 +21,7 @@ interface UserPreferences {
   auto_answer_prompt: string;
   auto_answer_provider: string;
   auto_answer_model: string;
+  custom_titlebar: boolean;
 }
 
 const CLAUDE_MODELS = [
@@ -74,8 +75,14 @@ export function Settings({ isOpen, onClose }: Props) {
 
   const handleSave = async () => {
     setSaving(true);
+    const titlebarChanged =
+      draft.custom_titlebar !== undefined && draft.custom_titlebar !== prefs?.custom_titlebar;
     try {
       await window.electronAPI.setPreferences(draft);
+      if (titlebarChanged) {
+        await window.electronAPI.relaunchApp(); // frame can't change without recreating the window
+        return;
+      }
       onClose();
     } finally {
       setSaving(false);
@@ -328,6 +335,34 @@ export function Settings({ isOpen, onClose }: Props) {
                   onChange={(e) => update({ font_size: Number(e.target.value) })}
                   className="w-full accent-blue-500"
                 />
+              </div>
+            </div>
+          </Section>
+
+          {/* Window */}
+          <Section title="Window">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-300">Custom frameless title bar</span>
+                <button
+                  onClick={() => update({ custom_titlebar: !merged.custom_titlebar })}
+                  className={`relative inline-flex h-5 w-9 rounded-full transition-colors ${
+                    merged.custom_titlebar ? 'bg-blue-600' : 'bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                      merged.custom_titlebar ? 'translate-x-4' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+              <div className="text-xs text-amber-300 bg-amber-900/20 border border-amber-800/60 rounded-lg px-3 py-2 flex gap-2">
+                <span>⚠</span>
+                <span>
+                  Changing this <b>restarts the app</b> on Save. Off = standard Windows title bar + menu.
+                  On = slim in-app bar (best for overlay mode). The window stays resizable either way.
+                </span>
               </div>
             </div>
           </Section>

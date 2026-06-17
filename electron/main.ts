@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron';
 import * as path from 'path';
 import * as keytar from 'keytar';
 import { SidecarManager } from './sidecar';
@@ -15,14 +15,20 @@ let wsConnection: import('ws').WebSocket | null = null;
 
 // ── Window ────────────────────────────────────────────────────────────────────
 
-function createWindow(): void {
+function createWindow(customTitlebar: boolean): void {
+  // `frame` is fixed at creation; when the custom title bar is on we drop the OS
+  // frame + menu and the renderer draws its own bar. Window stays resizable.
+  if (customTitlebar) {
+    Menu.setApplicationMenu(null);
+  }
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 400,
     minHeight: 535,
     backgroundColor: '#111827',
-    titleBarStyle: 'hiddenInset',
+    frame: !customTitlebar,
+    resizable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -272,6 +278,19 @@ ipcMain.handle('export-transcript', async (_e, { sessionId, format }: { sessionI
 
 ipcMain.handle('open-folder', (_e, folderPath: string) => shell.openPath(folderPath));
 
+// Custom title bar window controls
+ipcMain.handle('window-minimize', () => mainWindow?.minimize());
+ipcMain.handle('window-maximize', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  else mainWindow.maximize();
+});
+ipcMain.handle('window-close', () => mainWindow?.close());
+ipcMain.handle('relaunch-app', () => {
+  app.relaunch();
+  app.exit(0);
+});
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 // Push stored keys into the sidecar's memory so auto-answer (server-initiated,
@@ -292,7 +311,14 @@ app.on('ready', async () => {
     await sidecar.spawn();
     connectWebSocket();
     await syncKeysToSidecar();
-    createWindow();
+    let customTitlebar = false;
+    try {
+      const prefs = await apiRequest<{ custom_titlebar?: boolean }>('GET', '/api/preferences');
+      customTitlebar = Boolean(prefs.custom_titlebar);
+    } catch {
+      // fall back to the standard OS frame
+    }
+    createWindow(customTitlebar);
   } catch (err) {
     console.error('Failed to start sidecar:', err);
     app.quit();

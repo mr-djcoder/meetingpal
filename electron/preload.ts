@@ -70,6 +70,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('auto-answer-error', handler);
   },
 
+  // Window controls (custom title bar) + relaunch
+  windowMinimize: () => ipcRenderer.invoke('window-minimize'),
+  windowMaximize: () => ipcRenderer.invoke('window-maximize'),
+  windowClose: () => ipcRenderer.invoke('window-close'),
+  relaunchApp: () => ipcRenderer.invoke('relaunch-app'),
+
   // Export
   copyTranscript: (sessionId: string) => ipcRenderer.invoke('copy-transcript', sessionId),
   exportTranscript: (sessionId: string, format: string) =>

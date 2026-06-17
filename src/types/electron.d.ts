@@ -45,6 +45,7 @@ interface UserPreferences {
   auto_answer_provider: string;
   auto_answer_model: string;
   chat_panel_visible: boolean;
+  custom_titlebar: boolean;
 }
 
 interface AudioLevelFrame {
@@ -90,6 +91,10 @@ interface ElectronAPI {
   onAutoAnswerToken(cb: (m: { text: string }) => void): () => void;
   onAutoAnswerDone(cb: (m: unknown) => void): () => void;
   onAutoAnswerError(cb: (m: { message: string }) => void): () => void;
+  windowMinimize(): Promise<void>;
+  windowMaximize(): Promise<void>;
+  windowClose(): Promise<void>;
+  relaunchApp(): Promise<void>;
   copyTranscript(sessionId: string): Promise<void>;
   exportTranscript(sessionId: string, format: 'txt' | 'md'): Promise<string | null>;
 }
