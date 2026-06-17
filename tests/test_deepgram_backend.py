@@ -36,3 +36,30 @@ def test_empty_transcript_skipped():
     m = DeepgramStreamMapper(source="mic", session_id="s", emit=emitted.append)
     m.handle(_dg("", is_final=False))
     assert emitted == []
+
+
+def test_backend_feeds_pcm_and_reports_error(monkeypatch):
+    import numpy as np
+    from datetime import datetime
+    from backend.deepgram_backend import DeepgramBackend
+
+    sent = {"mic": [], "loopback": []}
+    errors = []
+
+    class FakeConn:
+        def __init__(self, source): self.source = source
+        async def send(self, data): sent[self.source].append(data)
+        async def finish(self): pass
+
+    def fake_open(source, on_message, on_error):
+        return FakeConn(source)
+
+    b = DeepgramBackend(
+        api_key="k", session_id="s", emit=lambda seg: None,
+        on_error=errors.append, conn_factory=fake_open,
+    )
+    b.start("s", datetime.now())
+    b.feed("mic", np.ones(8000, dtype=np.float32) * 0.1, 0.2)
+    b.stop()
+    assert len(sent["mic"]) >= 1
+    assert isinstance(sent["mic"][0], (bytes, bytearray))
