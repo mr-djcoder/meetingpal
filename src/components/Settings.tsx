@@ -80,7 +80,8 @@ export function Settings({ isOpen, onClose }: Props) {
     try {
       await window.electronAPI.setPreferences(draft);
       if (titlebarChanged) {
-        await window.electronAPI.relaunchApp(); // frame can't change without recreating the window
+        // recreates the window in-place with the new frame (this view is replaced)
+        await window.electronAPI.applyTitlebar(Boolean(merged.custom_titlebar));
         return;
       }
       onClose();
@@ -360,8 +361,8 @@ export function Settings({ isOpen, onClose }: Props) {
               <div className="text-xs text-amber-300 bg-amber-900/20 border border-amber-800/60 rounded-lg px-3 py-2 flex gap-2">
                 <span>⚠</span>
                 <span>
-                  Changing this <b>restarts the app</b> on Save. Off = standard Windows title bar + menu.
-                  On = slim in-app bar (best for overlay mode). The window stays resizable either way.
+                  Changing this <b>reloads the window</b> on Save. Off = standard Windows title bar + menu.
+                  On = slim in-app bar (best for overlay mode, default). The window stays resizable either way.
                 </span>
               </div>
             </div>

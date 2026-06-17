@@ -94,7 +94,7 @@ interface ElectronAPI {
   windowMinimize(): Promise<void>;
   windowMaximize(): Promise<void>;
   windowClose(): Promise<void>;
-  relaunchApp(): Promise<void>;
+  applyTitlebar(custom: boolean): Promise<void>;
   copyTranscript(sessionId: string): Promise<void>;
   exportTranscript(sessionId: string, format: 'txt' | 'md'): Promise<string | null>;
 }

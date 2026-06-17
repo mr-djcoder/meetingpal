@@ -74,7 +74,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   windowMinimize: () => ipcRenderer.invoke('window-minimize'),
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),
   windowClose: () => ipcRenderer.invoke('window-close'),
-  relaunchApp: () => ipcRenderer.invoke('relaunch-app'),
+  applyTitlebar: (custom: boolean) => ipcRenderer.invoke('apply-titlebar', custom),
 
   // Export
   copyTranscript: (sessionId: string) => ipcRenderer.invoke('copy-transcript', sessionId),

@@ -286,9 +286,15 @@ ipcMain.handle('window-maximize', () => {
   else mainWindow.maximize();
 });
 ipcMain.handle('window-close', () => mainWindow?.close());
-ipcMain.handle('relaunch-app', () => {
-  app.relaunch();
-  app.exit(0);
+
+// Apply the frame setting by recreating the window in-place. `frame` is fixed at
+// creation, but a full app.relaunch() would kill the Vite dev server in dev and
+// leave a blank window — recreating keeps the dev server (and sidecar) alive.
+ipcMain.handle('apply-titlebar', (_e, custom: boolean) => {
+  const old = mainWindow;
+  old?.removeAllListeners('closed'); // don't let the old window null out the new one
+  createWindow(Boolean(custom));
+  old?.destroy();
 });
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
