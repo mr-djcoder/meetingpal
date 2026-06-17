@@ -247,6 +247,18 @@ def store_deepgram_key(body: KeyBody):
     return {"stored": True}
 
 
+@app.get("/api/engine/status")
+def engine_status():
+    device = transcriber.device if transcriber else "unknown"
+    return {
+        "engine": prefs.transcription_engine,
+        "device": "GPU (CUDA)" if device == "cuda" else "CPU" if device == "cpu" else "unknown",
+        "model": prefs.whisper_model,
+        "mode": prefs.local_transcribe_mode,
+        "cloud_provider": prefs.cloud_provider,
+    }
+
+
 @app.get("/api/gemini/models")
 async def gemini_models():
     """List Gemini models for the picker; falls back to a static set without a key."""
