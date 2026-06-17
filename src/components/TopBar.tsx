@@ -3,6 +3,8 @@ import { useRecording } from '../hooks/useRecording';
 
 interface Props {
   onSettingsOpen: () => void;
+  chatVisible: boolean;
+  onToggleChat: () => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -11,7 +13,7 @@ function formatDuration(seconds: number): string {
   return `${m}:${s}`;
 }
 
-export function TopBar({ onSettingsOpen }: Props) {
+export function TopBar({ onSettingsOpen, chatVisible, onToggleChat }: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
   const [hasKey, setHasKey] = useState(false);
   const [autoAnswer, setAutoAnswer] = useState(false);
@@ -89,6 +91,20 @@ export function TopBar({ onSettingsOpen }: Props) {
           />
           <span className="text-xs text-gray-400">{hasKey ? 'API key set' : 'No API key'}</span>
         </div>
+
+        {/* Collapse AI chat sidebar */}
+        <button
+          onClick={onToggleChat}
+          title={chatVisible ? 'Hide AI panel' : 'Show AI panel'}
+          className={`p-1.5 rounded transition-colors ${
+            chatVisible ? 'text-gray-400 hover:text-white hover:bg-gray-700' : 'bg-blue-600 text-white'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5h16v14H4z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5v14" />
+          </svg>
+        </button>
 
         {/* Settings */}
         <button

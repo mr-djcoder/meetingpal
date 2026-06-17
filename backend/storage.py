@@ -39,6 +39,7 @@ class UserPreferences:
     )
     auto_answer_provider: str = "claude"
     auto_answer_model: str = "claude-haiku-4-5-20251001"
+    chat_panel_visible: bool = True
 
 
 def load_preferences() -> UserPreferences:

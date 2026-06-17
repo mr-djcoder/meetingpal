@@ -44,6 +44,7 @@ interface UserPreferences {
   auto_answer_prompt: string;
   auto_answer_provider: string;
   auto_answer_model: string;
+  chat_panel_visible: boolean;
 }
 
 interface AudioLevelFrame {

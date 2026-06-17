@@ -180,6 +180,7 @@ class PrefsUpdate(BaseModel):
     auto_answer_prompt: str | None = None
     auto_answer_provider: str | None = None
     auto_answer_model: str | None = None
+    chat_panel_visible: bool | None = None
 
 
 @app.put("/api/preferences")

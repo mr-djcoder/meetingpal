@@ -26,6 +26,7 @@ function MainLayout() {
   const { isRecording } = useTranscriptStore();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoAnswerOn, setAutoAnswerOn] = useState(false);
+  const [chatVisible, setChatVisible] = useState(true);
   const [errorBanner, setErrorBanner] = useState<SidecarError | null>(null);
   const [errorModal, setErrorModal] = useState<SidecarError | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
@@ -67,14 +68,25 @@ function MainLayout() {
       document.documentElement.classList.toggle('dark', p.theme === 'dark');
       document.documentElement.classList.toggle('light', p.theme === 'light');
       document.documentElement.style.setProperty('--transcript-font-size', `${p.font_size}px`);
-      const aa = prefs as unknown as { auto_answer_enabled?: boolean };
+      const aa = prefs as unknown as { auto_answer_enabled?: boolean; chat_panel_visible?: boolean };
       setAutoAnswerOn(Boolean(aa.auto_answer_enabled));
+      setChatVisible(aa.chat_panel_visible ?? true);
     });
   }, [settingsOpen]); // re-apply after settings close
 
+  const toggleChat = () => {
+    const next = !chatVisible;
+    setChatVisible(next);
+    window.electronAPI.setPreferences({ chat_panel_visible: next } as never);
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-gray-100 overflow-hidden">
-      <TopBar onSettingsOpen={() => setSettingsOpen(true)} />
+      <TopBar
+        onSettingsOpen={() => setSettingsOpen(true)}
+        chatVisible={chatVisible}
+        onToggleChat={toggleChat}
+      />
 
       {/* Error banner (recoverable) */}
       {errorBanner && (
@@ -102,9 +114,12 @@ function MainLayout() {
       )}
 
       {/* Main panels */}
-      <div className="flex-1 grid overflow-hidden" style={{ gridTemplateColumns: '60fr 40fr' }}>
+      <div
+        className="flex-1 grid overflow-hidden"
+        style={{ gridTemplateColumns: chatVisible ? '60fr 40fr' : '1fr' }}
+      >
         <TranscriptPanel />
-        <AIChatPanel />
+        {chatVisible && <AIChatPanel />}
       </div>
 
       {/* Auto-answer suggested-answer band */}
