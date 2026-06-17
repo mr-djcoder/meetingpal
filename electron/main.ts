@@ -294,8 +294,11 @@ ipcMain.handle('set-opacity', (_e, value: number) => {
 });
 
 ipcMain.handle('set-always-on-top', (_e, value: boolean) => {
-  mainWindow?.setAlwaysOnTop(Boolean(value));
-  return Boolean(value);
+  const on = Boolean(value);
+  // 'screen-saver' level keeps the window above other apps' normal windows on
+  // Windows; the default 'floating' level loses focus to other foreground apps.
+  mainWindow?.setAlwaysOnTop(on, 'screen-saver');
+  return on;
 });
 
 // Apply the frame setting by recreating the window in-place. `frame` is fixed at
