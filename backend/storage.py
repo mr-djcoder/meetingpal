@@ -43,6 +43,7 @@ class UserPreferences:
     custom_titlebar: bool = True
     window_opacity: float = 1.0
     transcript_split: float = 60.0  # % width of the transcript panel
+    transcript_visible: bool = False
 
 
 def load_preferences() -> UserPreferences:

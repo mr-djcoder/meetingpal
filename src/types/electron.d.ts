@@ -48,6 +48,7 @@ interface UserPreferences {
   custom_titlebar: boolean;
   window_opacity: number;
   transcript_split: number;
+  transcript_visible: boolean;
 }
 
 interface AudioLevelFrame {

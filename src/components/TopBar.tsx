@@ -5,6 +5,8 @@ interface Props {
   onSettingsOpen: () => void;
   chatVisible: boolean;
   onToggleChat: () => void;
+  transcriptVisible: boolean;
+  onToggleTranscript: () => void;
   customTitlebar: boolean;
 }
 
@@ -14,7 +16,14 @@ function formatDuration(seconds: number): string {
   return `${m}:${s}`;
 }
 
-export function TopBar({ onSettingsOpen, chatVisible, onToggleChat, customTitlebar }: Props) {
+export function TopBar({
+  onSettingsOpen,
+  chatVisible,
+  onToggleChat,
+  transcriptVisible,
+  onToggleTranscript,
+  customTitlebar,
+}: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
   const [autoAnswer, setAutoAnswer] = useState(false);
   const [narrow, setNarrow] = useState(false);
@@ -110,6 +119,25 @@ export function TopBar({ onSettingsOpen, chatVisible, onToggleChat, customTitleb
             </svg>
           ) : (
             'AI Auto'
+          )}
+        </button>
+
+        {/* Toggle transcript */}
+        <button
+          onClick={onToggleTranscript}
+          title={transcriptVisible ? 'Hide transcript' : 'Show transcript'}
+          className={
+            narrow
+              ? `p-1.5 rounded transition-colors ${transcriptVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              : `text-xs px-2 py-1 rounded font-medium transition-colors ${transcriptVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+          }
+        >
+          {narrow ? (
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h10M4 18h10" />
+            </svg>
+          ) : (
+            'Transcript'
           )}
         </button>
 

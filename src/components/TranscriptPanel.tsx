@@ -8,24 +8,6 @@ export function TranscriptPanel() {
   const [userScrolled, setUserScrolled] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [opacity, setOpacity] = useState(100); // window opacity, percent
-
-  useEffect(() => {
-    window.electronAPI
-      .getPreferences()
-      .then((p) => {
-        const o = (p as unknown as { window_opacity?: number }).window_opacity ?? 1;
-        setOpacity(Math.round(o * 100));
-      })
-      .catch(() => { /* default 100 */ });
-  }, []);
-
-  const changeOpacity = (pct: number) => {
-    setOpacity(pct);
-    const frac = pct / 100;
-    window.electronAPI.setOpacity(frac);
-    window.electronAPI.setPreferences({ window_opacity: frac } as never);
-  };
 
   // Auto-scroll unless user scrolled up
   useEffect(() => {
@@ -93,20 +75,6 @@ export function TranscriptPanel() {
             )}
           </div>
         </div>
-      </div>
-
-      {/* Transparency slider */}
-      <div className="flex items-center gap-2 px-4 py-1.5 border-b border-gray-800">
-        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Opacity</span>
-        <input
-          type="range"
-          min={5}
-          max={100}
-          value={opacity}
-          onChange={(e) => changeOpacity(Number(e.target.value))}
-          className="flex-1 accent-blue-500"
-        />
-        <span className="text-xs text-gray-400 w-9 text-right">{opacity}%</span>
       </div>
 
       {/* Segments */}

@@ -192,6 +192,7 @@ class PrefsUpdate(BaseModel):
     custom_titlebar: bool | None = None
     window_opacity: float | None = None
     transcript_split: float | None = None
+    transcript_visible: bool | None = None
 
 
 @app.put("/api/preferences")
