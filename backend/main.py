@@ -34,6 +34,7 @@ from backend.transcriber import WhisperTranscriber
 transcriber: WhisperTranscriber | None = None
 audio_capture: AudioCapture | None = None
 active_session: RecordingSession | None = None
+active_backend = None  # LocalBackend or DeepgramBackend for the running session
 connected_websockets: set[WebSocket] = set()
 prefs: UserPreferences = UserPreferences()
 _api_key_memory: str | None = None  # Claude key, held in-process only, never on disk
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
     transcriber = WhisperTranscriber(
         model_name=prefs.whisper_model,
         emit_callback=_on_transcript_segment,
+        transcribe_mode=prefs.local_transcribe_mode,
     )
     # Load model in background so health returns model_loaded=false while loading
     event_loop.run_in_executor(None, transcriber.load_model, None)
@@ -280,16 +282,13 @@ class StartSessionBody(BaseModel):
 
 @app.post("/api/session/start")
 async def start_session(body: StartSessionBody, request: Request):
-    global active_session, audio_capture
+    global active_session, audio_capture, active_backend
 
     if active_session and active_session.status == "recording":
         raise HTTPException(
             status_code=409,
             detail={"error": "A recording session is already active", "session_id": active_session.id},
         )
-
-    if not transcriber or not transcriber.model_loaded:
-        raise HTTPException(status_code=503, detail="Whisper model not yet loaded")
 
     session = RecordingSession(
         id=str(uuid.uuid4()),
@@ -298,15 +297,38 @@ async def start_session(body: StartSessionBody, request: Request):
     )
     active_session = session
 
+    from backend.transcription_backend import LocalBackend
+    from backend.deepgram_backend import DeepgramBackend
+
+    if prefs.transcription_engine == "cloud":
+        if not _deepgram_key_memory:
+            active_session = None
+            raise HTTPException(status_code=400, detail="Cloud engine selected but no Deepgram key set")
+        active_backend = DeepgramBackend(
+            api_key=_deepgram_key_memory,
+            session_id=session.id,
+            emit=_on_transcript_segment,
+            on_error=lambda msg: event_loop and event_loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(_broadcast(
+                    {"type": "error", "code": "cloud_transcription",
+                     "message": msg, "recoverable": True}))),
+            started_at=session.started_at,
+        )
+    else:
+        if not transcriber or not transcriber.model_loaded:
+            active_session = None
+            raise HTTPException(status_code=503, detail="Whisper model not yet loaded")
+        active_backend = LocalBackend(transcriber)
+
     def _chunk_cb(source, frame, rms):
-        transcriber.enqueue(source, frame, rms)
+        active_backend.feed(source, frame, rms)
 
     audio_capture = AudioCapture(
         chunk_callback=_chunk_cb,
         mic_device_index=body.mic_device_index or prefs.mic_device_index,
         loopback_device_index=body.loopback_device_index or prefs.loopback_device_index,
     )
-    transcriber.start(session.id, session.started_at)
+    active_backend.start(session.id, session.started_at)
     audio_capture.start()
 
     # Start audio level broadcast task
@@ -340,7 +362,7 @@ async def _audio_level_task(started_at: datetime) -> None:
 
 
 async def _do_stop_session() -> dict:
-    global active_session, audio_capture
+    global active_session, audio_capture, active_backend
 
     if not active_session or active_session.status != "recording":
         raise HTTPException(status_code=404, detail="No active recording session")
@@ -352,8 +374,8 @@ async def _do_stop_session() -> dict:
     if audio_capture:
         audio_capture.stop()
         audio_capture = None
-    if transcriber:
-        transcriber.stop()
+    if active_backend:
+        active_backend.stop()
 
     save_path_val: str | None = None
     if prefs.auto_save:
