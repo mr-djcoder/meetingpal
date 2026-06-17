@@ -287,6 +287,12 @@ ipcMain.handle('window-maximize', () => {
 });
 ipcMain.handle('window-close', () => mainWindow?.close());
 
+ipcMain.handle('set-opacity', (_e, value: number) => {
+  const clamped = Math.min(1, Math.max(0.05, Number(value)));
+  mainWindow?.setOpacity(clamped);
+  return clamped;
+});
+
 // Apply the frame setting by recreating the window in-place. `frame` is fixed at
 // creation, but a full app.relaunch() would kill the Vite dev server in dev and
 // leave a blank window — recreating keeps the dev server (and sidecar) alive.

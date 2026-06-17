@@ -5,6 +5,7 @@ interface Props {
   onSettingsOpen: () => void;
   chatVisible: boolean;
   onToggleChat: () => void;
+  customTitlebar: boolean;
 }
 
 function formatDuration(seconds: number): string {
@@ -13,15 +14,24 @@ function formatDuration(seconds: number): string {
   return `${m}:${s}`;
 }
 
-export function TopBar({ onSettingsOpen, chatVisible, onToggleChat }: Props) {
+export function TopBar({ onSettingsOpen, chatVisible, onToggleChat, customTitlebar }: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
   const [autoAnswer, setAutoAnswer] = useState(false);
+  const [narrow, setNarrow] = useState(false);
 
   useEffect(() => {
     window.electronAPI
       .getPreferences()
       .then((p) => setAutoAnswer(Boolean((p as unknown as { auto_answer_enabled?: boolean }).auto_answer_enabled)))
       .catch(() => { /* default off */ });
+  }, []);
+
+  // Collapse labels to icons on a narrow window.
+  useEffect(() => {
+    const onResize = () => setNarrow(window.innerWidth < 450);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   const toggleAutoAnswer = async () => {
@@ -31,54 +41,76 @@ export function TopBar({ onSettingsOpen, chatVisible, onToggleChat }: Props) {
   };
 
   const handleToggle = async () => {
-    if (isRecording) {
-      await stopRecording();
-    } else {
-      await startRecording();
-    }
+    if (isRecording) await stopRecording();
+    else await startRecording();
   };
 
-  return (
-    <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 select-none">
-      {/* Logo */}
-      <div className="flex items-center gap-2">
-        <div className="w-7 h-7 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">
-          M
-        </div>
-        <span className="font-semibold text-white text-sm">MeetingPal</span>
-      </div>
+  const recordIcon = isRecording ? (
+    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  ) : (
+    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="12" cy="12" r="7" />
+    </svg>
+  );
 
-      {/* Center controls */}
-      <div className="flex items-center gap-4">
+  return (
+    <div className="flex items-center justify-between px-3 py-2 bg-gray-900 border-b border-gray-700 select-none gap-2">
+      {/* Left: record first; logo only when the OS frame is shown */}
+      <div className="flex items-center gap-2 min-w-0">
+        {!customTitlebar && (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="w-7 h-7 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+              M
+            </div>
+            <span className="font-semibold text-white text-sm">MeetingPal</span>
+          </div>
+        )}
+
+        <button
+          onClick={handleToggle}
+          title={isRecording ? 'Stop recording' : 'Start recording'}
+          className={
+            narrow
+              ? `w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                  isRecording ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`
+              : `px-4 py-1.5 rounded-full text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                  isRecording ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`
+          }
+        >
+          {narrow ? recordIcon : isRecording ? 'Stop Recording' : 'Start Recording'}
+        </button>
+
         {isRecording && (
-          <span className="flex items-center gap-1.5 text-sm text-gray-300">
+          <span className="flex items-center gap-1.5 text-sm text-gray-300 flex-shrink-0">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
             {formatDuration(duration)}
           </span>
         )}
-        <button
-          onClick={handleToggle}
-          className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-            isRecording
-              ? 'bg-red-600 hover:bg-red-700 text-white'
-              : 'bg-blue-600 hover:bg-blue-700 text-white'
-          }`}
-        >
-          {isRecording ? 'Stop Recording' : 'Start Recording'}
-        </button>
       </div>
 
-      {/* Right side */}
-      <div className="flex items-center gap-3">
-        {/* Auto-answer quick toggle */}
+      {/* Right controls */}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Auto-answer toggle */}
         <button
           onClick={toggleAutoAnswer}
           title={autoAnswer ? 'Auto-answer ON' : 'Auto-answer OFF'}
-          className={`text-xs px-2 py-1 rounded font-medium transition-colors ${
-            autoAnswer ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'
-          }`}
+          className={
+            narrow
+              ? `p-1.5 rounded transition-colors ${autoAnswer ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              : `text-xs px-2 py-1 rounded font-medium transition-colors ${autoAnswer ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+          }
         >
-          AI Auto
+          {narrow ? (
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" />
+            </svg>
+          ) : (
+            'AI Auto'
+          )}
         </button>
 
         {/* Collapse AI chat sidebar */}

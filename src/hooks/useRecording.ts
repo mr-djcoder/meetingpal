@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAutoAnswerStore } from '../store/autoAnswerStore';
 import { useTranscriptStore } from '../store/transcriptStore';
 
 export interface RecordingState {
@@ -43,6 +44,7 @@ export function useRecording(): RecordingState {
   const stopRecording = useCallback(async () => {
     await window.electronAPI.stopSession();
     stopSession();
+    useAutoAnswerStore.getState().clear();
   }, [stopSession]);
 
   return { isRecording, duration, startRecording, stopRecording };

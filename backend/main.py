@@ -182,6 +182,7 @@ class PrefsUpdate(BaseModel):
     auto_answer_model: str | None = None
     chat_panel_visible: bool | None = None
     custom_titlebar: bool | None = None
+    window_opacity: float | None = None
 
 
 @app.put("/api/preferences")

@@ -2,19 +2,37 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranscriptStore } from '../store/transcriptStore';
 
 export function TranscriptPanel() {
-  const { segments, sessionId, isRecording } = useTranscriptStore();
+  const { segments, sessionId, isRecording, inlineAnswers } = useTranscriptStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [userScrolled, setUserScrolled] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [opacity, setOpacity] = useState(100); // window opacity, percent
+
+  useEffect(() => {
+    window.electronAPI
+      .getPreferences()
+      .then((p) => {
+        const o = (p as unknown as { window_opacity?: number }).window_opacity ?? 1;
+        setOpacity(Math.round(o * 100));
+      })
+      .catch(() => { /* default 100 */ });
+  }, []);
+
+  const changeOpacity = (pct: number) => {
+    setOpacity(pct);
+    const frac = pct / 100;
+    window.electronAPI.setOpacity(frac);
+    window.electronAPI.setPreferences({ window_opacity: frac } as never);
+  };
 
   // Auto-scroll unless user scrolled up
   useEffect(() => {
     if (!userScrolled) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [segments, userScrolled]);
+  }, [segments, inlineAnswers, userScrolled]);
 
   const handleScroll = () => {
     const el = containerRef.current;
@@ -77,6 +95,20 @@ export function TranscriptPanel() {
         </div>
       </div>
 
+      {/* Transparency slider */}
+      <div className="flex items-center gap-2 px-4 py-1.5 border-b border-gray-800">
+        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Opacity</span>
+        <input
+          type="range"
+          min={5}
+          max={100}
+          value={opacity}
+          onChange={(e) => changeOpacity(Number(e.target.value))}
+          className="flex-1 accent-blue-500"
+        />
+        <span className="text-xs text-gray-400 w-9 text-right">{opacity}%</span>
+      </div>
+
       {/* Segments */}
       <div
         ref={containerRef}
@@ -97,19 +129,35 @@ export function TranscriptPanel() {
             second: '2-digit',
           });
           const isYou = seg.speaker === 'You';
+          const inline = inlineAnswers[seg.id];
           return (
-            <div key={seg.id} className="flex gap-2 items-start transcript-font">
-              <span
-                className={`mt-0.5 flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded ${
-                  isYou
-                    ? 'bg-blue-900 text-blue-300'
-                    : 'bg-gray-700 text-gray-300'
-                }`}
-              >
-                {seg.speaker}
-              </span>
-              <span className="text-xs text-gray-500 flex-shrink-0 mt-0.5">{time}</span>
-              <p className="text-gray-100 leading-relaxed">{seg.text}</p>
+            <div key={seg.id} className="space-y-1">
+              <div className="flex gap-2 items-start transcript-font">
+                <span
+                  className={`mt-0.5 flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded ${
+                    isYou
+                      ? 'bg-blue-900 text-blue-300'
+                      : 'bg-gray-700 text-gray-300'
+                  }`}
+                >
+                  {seg.speaker}
+                </span>
+                <span className="text-xs text-gray-500 flex-shrink-0 mt-0.5">{time}</span>
+                <p className="text-gray-100 leading-relaxed">{seg.text}</p>
+              </div>
+              {inline && (
+                <div className="flex gap-2 items-start transcript-font pl-1">
+                  <span className="mt-0.5 flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded bg-emerald-900 text-emerald-300">
+                    AI
+                  </span>
+                  <p className="text-emerald-100 leading-relaxed">
+                    {inline.text}
+                    {inline.streaming && (
+                      <span className="inline-block w-1.5 h-4 ml-0.5 bg-emerald-400 animate-pulse align-text-bottom" />
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
           );
         })}

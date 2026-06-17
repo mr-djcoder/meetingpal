@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { AIChatPanel } from './components/AIChatPanel';
-import { AudioVisualizer } from './components/AudioVisualizer';
 import { CustomTitleBar } from './components/CustomTitleBar';
 import { Settings } from './components/Settings';
 import { SuggestedAnswerPanel } from './components/SuggestedAnswerPanel';
@@ -8,7 +7,6 @@ import { TopBar } from './components/TopBar';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 import { OnboardingWizard } from './onboarding/OnboardingWizard';
-import { useTranscriptStore } from './store/transcriptStore';
 
 interface SidecarError {
   type: 'error';
@@ -23,8 +21,7 @@ interface ModelDownloadProgress {
 }
 
 function MainLayout() {
-  const audioLevels = useWebSocket();
-  const { isRecording } = useTranscriptStore();
+  useWebSocket(); // sets up transcript + auto-answer IPC subscriptions
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoAnswerOn, setAutoAnswerOn] = useState(false);
   const [chatVisible, setChatVisible] = useState(true);
@@ -74,10 +71,12 @@ function MainLayout() {
         auto_answer_enabled?: boolean;
         chat_panel_visible?: boolean;
         custom_titlebar?: boolean;
+        window_opacity?: number;
       };
       setAutoAnswerOn(Boolean(aa.auto_answer_enabled));
       setChatVisible(aa.chat_panel_visible ?? true);
       setCustomTitlebar(Boolean(aa.custom_titlebar));
+      window.electronAPI.setOpacity(aa.window_opacity ?? 1);
     });
   }, [settingsOpen]); // re-apply after settings close
 
@@ -94,6 +93,7 @@ function MainLayout() {
         onSettingsOpen={() => setSettingsOpen(true)}
         chatVisible={chatVisible}
         onToggleChat={toggleChat}
+        customTitlebar={customTitlebar}
       />
 
       {/* Error banner (recoverable) */}
@@ -132,13 +132,6 @@ function MainLayout() {
 
       {/* Auto-answer suggested-answer band */}
       {autoAnswerOn && <SuggestedAnswerPanel />}
-
-      {/* Audio visualizer — shown when recording */}
-      {isRecording && (
-        <div className="border-t border-gray-700 px-4 py-2 bg-gray-900">
-          <AudioVisualizer micLevel={audioLevels.mic} loopbackLevel={audioLevels.loopback} />
-        </div>
-      )}
 
       {/* Settings modal */}
       <Settings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />

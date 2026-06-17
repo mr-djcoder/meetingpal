@@ -48,9 +48,19 @@ export function useWebSocket(): AudioLevels {
     });
 
     const aa = useAutoAnswerStore.getState;
-    const offAaStart = api.onAutoAnswerStart((m) => aa().start(m.question));
-    const offAaToken = api.onAutoAnswerToken((m) => aa().appendToken(m.text));
-    const offAaDone = api.onAutoAnswerDone(() => aa().done());
+    const ts = useTranscriptStore.getState;
+    const offAaStart = api.onAutoAnswerStart((m) => {
+      aa().start(m.question);
+      ts().startInlineAnswer();
+    });
+    const offAaToken = api.onAutoAnswerToken((m) => {
+      aa().appendToken(m.text);
+      ts().appendInlineToken(m.text);
+    });
+    const offAaDone = api.onAutoAnswerDone(() => {
+      aa().done();
+      ts().finishInlineAnswer();
+    });
     const offAaError = api.onAutoAnswerError((m) => aa().setError(m.message));
 
     cleanupRefs.current = [

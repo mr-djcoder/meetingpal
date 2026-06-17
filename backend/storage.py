@@ -41,6 +41,7 @@ class UserPreferences:
     auto_answer_model: str = "claude-haiku-4-5-20251001"
     chat_panel_visible: bool = True
     custom_titlebar: bool = True
+    window_opacity: float = 1.0
 
 
 def load_preferences() -> UserPreferences:

@@ -46,6 +46,7 @@ interface UserPreferences {
   auto_answer_model: string;
   chat_panel_visible: boolean;
   custom_titlebar: boolean;
+  window_opacity: number;
 }
 
 interface AudioLevelFrame {
@@ -95,6 +96,7 @@ interface ElectronAPI {
   windowMaximize(): Promise<void>;
   windowClose(): Promise<void>;
   applyTitlebar(custom: boolean): Promise<void>;
+  setOpacity(value: number): Promise<number>;
   copyTranscript(sessionId: string): Promise<void>;
   exportTranscript(sessionId: string, format: 'txt' | 'md'): Promise<string | null>;
 }
