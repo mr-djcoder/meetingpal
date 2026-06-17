@@ -2,7 +2,7 @@
 
 Real-time meeting transcription and AI assistant for Windows. Captures system audio (WASAPI loopback) **and** your microphone, transcribes locally with faster-whisper, labels speakers, and answers questions about the live conversation using Claude — all without audio ever leaving the machine.
 
-> **Platform:** Windows 10/11 64-bit only. **Privacy:** transcription is fully local; the only outbound calls are to the Claude API for Q&A.
+> **Platform:** Windows 10/11 64-bit only. **Privacy:** transcription is fully local; the only outbound calls are to the **Claude API** for Q&A — and, **if you enable auto-answer mode with the Gemini provider, to the Google Gemini API**. Transcript text is sent to whichever provider you choose.
 
 ## Stack
 
@@ -89,7 +89,8 @@ npm run make               # Package with Electron Forge (Squirrel installer)
 ## Privacy & security
 
 - **Audio never leaves the machine** — transcription is local via faster-whisper.
-- **API key** is stored only in Windows Credential Manager (keytar). Never written to disk, logs, or frontend state.
+- **API keys** (Claude and, optionally, Gemini) are stored only in Windows Credential Manager (keytar). Never written to disk, logs, or frontend state.
+- **Outbound text:** Q&A and auto-answer send transcript text to the selected LLM provider (Claude by default; Google Gemini if you select it). Nothing else leaves the machine.
 - `.env*`, `*.key`, `preferences.json`, model weights, and logs are git-ignored. Do not commit secrets.
 
 ## Key constraints
@@ -100,4 +101,6 @@ npm run make               # Package with Electron Forge (Squirrel installer)
 
 ## Status
 
-Core app implemented (capture, transcription, VAD, diarization, Claude streaming Q&A, onboarding, settings, transcript save/export). Active work: caption-style **utterance assembler** to replace per-chunk fragments with whole-statement transcript lines — see `docs/superpowers/specs/2026-06-13-utterance-assembler-design.md`.
+Core app implemented (capture, transcription, VAD, diarization, Claude streaming Q&A, onboarding, settings, transcript save/export).
+
+**Auto-answer mode:** when the other party asks a question, MeetingPal can automatically answer it with your chosen LLM (Claude or Gemini, with a model picker) using a custom prompt, streaming the reply as `AI:<response>` in a Suggested-Answer panel. Configured in Settings, toggled from the TopBar. See `docs/superpowers/specs/2026-06-16-auto-answer-mode-design.md`.
