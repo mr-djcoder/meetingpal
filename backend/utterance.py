@@ -25,7 +25,7 @@ def clean_text(text: str) -> str:
     return t
 
 
-class UtteranceAssembler:
+class LegacyUtteranceAssembler:
     def __init__(
         self,
         transcribe_fn: TranscribeFn,
@@ -140,3 +140,9 @@ class UtteranceAssembler:
             confidence=1.0,
         )
         self._emit_fn(seg)
+
+
+# Back-compat alias: existing imports of UtteranceAssembler keep working and refer
+# to the proven full-buffer assembler. The streaming variant lives in
+# backend/streaming_utterance.py and is selected by local_transcribe_mode.
+UtteranceAssembler = LegacyUtteranceAssembler
