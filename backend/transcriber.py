@@ -74,6 +74,9 @@ class WhisperTranscriber:
         self._session_id = session_id
         self._session_started_at = session_started_at
         self._last_text = ""
+        # Drop any chunks left over from a previous session — otherwise the new
+        # session would transcribe stale audio "after the fact" on stop/restart.
+        self._drain_queue()
         self._vad.reset()
         self._stop_event.clear()
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
@@ -85,6 +88,16 @@ class WhisperTranscriber:
         self._queue.put(None)  # sentinel
         if self._worker:
             self._worker.join(timeout=10)
+        self._drain_queue()
+
+    def _drain_queue(self) -> None:
+        """Discard all pending items in the queue without processing them."""
+        try:
+            while True:
+                self._queue.get_nowait()
+                self._queue.task_done()
+        except queue.Empty:
+            pass
 
     def enqueue(self, chunk: np.ndarray, mic_rms: float, loopback_rms: float) -> None:
         """Enqueue a 3s audio chunk for transcription."""
@@ -94,6 +107,11 @@ class WhisperTranscriber:
             offset = (now - self._session_started_at).total_seconds()
         self._queue.put((chunk, mic_rms, loopback_rms, self._session_id, now, offset))
 
+    # If transcription falls this many chunks behind realtime, skip the oldest
+    # backlog and jump to the newest so latency can't snowball unbounded. Each
+    # chunk is ~2.5s of advance, so 3 ≈ a ~7.5s recovery ceiling.
+    _MAX_BACKLOG = 3
+
     def _worker_loop(self) -> None:
         while not self._stop_event.is_set():
             try:
@@ -102,6 +120,21 @@ class WhisperTranscriber:
                 continue
             if item is None:
                 break
+            # Latency cap: if we're badly behind, drop stale chunks and keep the
+            # most recent so the live transcript stays close to realtime.
+            dropped = False
+            while self._queue.qsize() > self._MAX_BACKLOG:
+                nxt = self._queue.get_nowait()
+                self._queue.task_done()
+                if nxt is None:
+                    item = None
+                    break
+                item = nxt
+                dropped = True
+            if item is None:
+                break
+            if dropped:
+                print("[transcriber] backlog cap hit — dropped stale chunks", flush=True)
             chunk, mic_rms, loopback_rms, session_id, wall_clock, offset = item
             self._process_chunk(chunk, mic_rms, loopback_rms, session_id, wall_clock, offset)
             self._queue.task_done()
@@ -124,9 +157,9 @@ class WhisperTranscriber:
         try:
             segments, _info = self._model.transcribe(
                 chunk,
-                beam_size=5,
-                vad_filter=True,
-                condition_on_previous_text=True,
+                beam_size=1,  # greedy — much faster on CPU int8
+                vad_filter=False,  # Silero VAD already gated this chunk; skip whisper's VAD
+                condition_on_previous_text=False,  # avoid latency from carrying context
                 temperature=0.0,
                 word_timestamps=False,
             )
