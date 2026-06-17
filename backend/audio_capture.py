@@ -15,6 +15,7 @@ TARGET_RATE = 16000
 CHUNK_FRAMES = 1024
 LOOPBACK_RATE = 44100
 ROLLING_MAXLEN = int(3.5 * TARGET_RATE)  # 3.5s worth of samples
+FRAME_SAMPLES = int(0.5 * TARGET_RATE)  # 0.5s frame = 8000 samples @ 16kHz
 
 
 class AudioCapture:
@@ -39,8 +40,6 @@ class AudioCapture:
         self._loopback_thread: threading.Thread | None = None
         self._emit_thread: threading.Thread | None = None
 
-        # samples since last chunk advance
-        self._samples_since_last_emit = 0
         self._lock = threading.Lock()
 
     def start(self) -> None:
@@ -100,8 +99,6 @@ class AudioCapture:
                 arr = np.clip(arr, -1.0, 1.0)
                 with self._lock:
                     self._mic_buffer.extend(arr.tolist())
-                    # Mic thread drives the emit clock (always streaming).
-                    self._samples_since_last_emit += len(arr)
         finally:
             stream.stop_stream()
             stream.close()
@@ -137,24 +134,19 @@ class AudioCapture:
             stream.close()
 
     def _emit_chunks(self) -> None:
-        """Every 2.5s of new samples, emit a 3s chunk to the callback."""
+        """Drain contiguous 0.5s frames from each source independently (no mixing)."""
         import time
-        ADVANCE_SAMPLES = int(2.5 * TARGET_RATE)
-        CHUNK_SAMPLES = int(3.0 * TARGET_RATE)
         while not self._stop_event.is_set():
-            time.sleep(0.1)
+            time.sleep(0.05)
             with self._lock:
-                if self._samples_since_last_emit < ADVANCE_SAMPLES:
-                    continue
-                # Take the most recent 3s from each clean single-source buffer.
-                mic_tail = list(self._mic_buffer)[-CHUNK_SAMPLES:]
-                lb_tail = list(self._loopback_buffer)[-CHUNK_SAMPLES:]
+                mic_frame = drain_frame(self._mic_buffer, FRAME_SAMPLES)
+                lb_frame = drain_frame(self._loopback_buffer, FRAME_SAMPLES)
                 mic_rms = self.get_mic_rms()
                 lb_rms = self.get_loopback_rms()
-                self._samples_since_last_emit = 0
-            chunk = _mix_aligned(mic_tail, lb_tail, CHUNK_SAMPLES)
-            if len(chunk) > 0:
-                self._chunk_callback(chunk, mic_rms, lb_rms)
+            if mic_frame is not None:
+                self._chunk_callback("mic", mic_frame, mic_rms)
+            if lb_frame is not None:
+                self._chunk_callback("loopback", lb_frame, lb_rms)
 
     def _get_default_mic_info(self) -> dict:
         try:
@@ -174,23 +166,15 @@ class AudioCapture:
             raise RuntimeError("No WASAPI loopback device found")
 
 
-def _mix_aligned(mic_tail: list[float], lb_tail: list[float], chunk_samples: int) -> np.ndarray:
-    """Sum mic + loopback sample-aligned by recency, each at half gain.
+def drain_frame(buffer: deque, n: int) -> np.ndarray | None:
+    """Pop exactly n samples from the front of buffer as a float32 array.
 
-    The two source buffers may differ slightly in length (independent native
-    rates after resample). Align both to the most-recent `chunk_samples` by
-    right-justifying and zero-padding the front of the shorter one.
+    Returns None (leaving the buffer untouched) when fewer than n samples
+    are available.
     """
-    def _tail(samples: list[float]) -> np.ndarray:
-        arr = np.array(samples[-chunk_samples:], dtype=np.float32)
-        if len(arr) < chunk_samples:
-            arr = np.concatenate([np.zeros(chunk_samples - len(arr), dtype=np.float32), arr])
-        return arr
-
-    if not mic_tail and not lb_tail:
-        return np.empty(0, dtype=np.float32)
-    mixed = _tail(mic_tail) * 0.5 + _tail(lb_tail) * 0.5
-    return np.clip(mixed, -1.0, 1.0)
+    if len(buffer) < n:
+        return None
+    return np.array([buffer.popleft() for _ in range(n)], dtype=np.float32)
 
 
 def enumerate_devices(pa: pyaudio.PyAudio | None = None) -> list[AudioDevice]:

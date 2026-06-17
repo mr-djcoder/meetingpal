@@ -3,15 +3,14 @@ from __future__ import annotations
 
 import queue
 import threading
-import uuid
 from datetime import datetime
-from typing import Callable, Literal
+from typing import Callable
 
 import numpy as np
 from faster_whisper import WhisperModel
 
-from backend.diarizer import get_speaker
 from backend.models import TranscriptSegment
+from backend.utterance import UtteranceAssembler
 from backend.vad import SileroVAD
 
 DownloadProgressCallback = Callable[[float], None]
@@ -29,13 +28,17 @@ class WhisperTranscriber:
         self._download_progress_cb = download_progress_cb
         self._model: WhisperModel | None = None
         self._model_loaded = False
-        self._queue: queue.Queue[tuple[np.ndarray, float, float, str, datetime, float] | None] = queue.Queue()
+        self._queue: queue.Queue[tuple | None] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._stop_event = threading.Event()
+        # One shared VAD: is_speech_frame analyses each 0.5s frame independently
+        # (no cross-call state), so a single instance is safe for both sources and
+        # halves native (torch) init vs one-per-source.
         self._vad: SileroVAD | None = None  # lazy-loaded in load_model()
-        self._last_text = ""
         self._session_started_at: datetime | None = None
         self._session_id: str = ""
+        self._mic_assembler: UtteranceAssembler | None = None
+        self._lb_assembler: UtteranceAssembler | None = None
 
     @property
     def model_loaded(self) -> bool:
@@ -46,12 +49,10 @@ class WhisperTranscriber:
         if name:
             self._model_name = name
         self._model_loaded = False
-        # Stop existing worker if any
         if self._worker and self._worker.is_alive():
             self._queue.put(None)
             self._worker.join(timeout=5)
 
-        # Lazy-load VAD on first model load
         if self._vad is None:
             self._vad = SileroVAD()
 
@@ -69,26 +70,52 @@ class WhisperTranscriber:
             )
         self._model_loaded = True
 
+    def transcribe(self, buffer: np.ndarray, beam_size: int) -> str:
+        """Transcribe a complete audio buffer to text. Called from the worker thread."""
+        if self._model is None:
+            return ""
+        try:
+            segments, _info = self._model.transcribe(
+                buffer,
+                beam_size=beam_size,
+                vad_filter=False,  # Silero already gated each frame; skip whisper's VAD (faster)
+                condition_on_previous_text=False,  # avoid latency from carrying context
+                temperature=0.0,
+                word_timestamps=False,
+            )
+            return " ".join(s.text.strip() for s in segments).strip()
+        except Exception:
+            return ""
+
     def start(self, session_id: str, session_started_at: datetime) -> None:
         """Start the worker thread for a new session."""
         self._session_id = session_id
         self._session_started_at = session_started_at
-        self._last_text = ""
-        # Drop any chunks left over from a previous session — otherwise the new
-        # session would transcribe stale audio "after the fact" on stop/restart.
+        # Drop any frames left over from a previous session so the new one never
+        # transcribes stale audio "after the fact" on stop/restart.
         self._drain_queue()
-        self._vad.reset()
+        if self._vad:
+            self._vad.reset()
+        emit = self._emit_callback if self._emit_callback else (lambda _seg: None)
+        self._mic_assembler = UtteranceAssembler(self.transcribe, emit, session_id, speaker="You")
+        self._lb_assembler = UtteranceAssembler(self.transcribe, emit, session_id, speaker="Them")
         self._stop_event.clear()
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
 
     def stop(self) -> None:
-        """Signal the worker to stop and wait for it to drain the queue."""
+        """Signal the worker to stop, wait for it to drain, then flush a final utterance."""
         self._stop_event.set()
         self._queue.put(None)  # sentinel
         if self._worker:
             self._worker.join(timeout=10)
         self._drain_queue()
+        # Flush AFTER the worker has exited so the Whisper model is only ever accessed
+        # by one thread at a time (WhisperModel is not thread-safe).
+        if self._mic_assembler:
+            self._mic_assembler.flush()
+        if self._lb_assembler:
+            self._lb_assembler.flush()
 
     def _drain_queue(self) -> None:
         """Discard all pending items in the queue without processing them."""
@@ -99,18 +126,13 @@ class WhisperTranscriber:
         except queue.Empty:
             pass
 
-    def enqueue(self, chunk: np.ndarray, mic_rms: float, loopback_rms: float) -> None:
-        """Enqueue a 3s audio chunk for transcription."""
+    def enqueue(self, source: str, frame: np.ndarray, rms: float) -> None:
+        """Enqueue a 0.5s audio frame for a source ('mic' or 'loopback')."""
         now = datetime.now()
         offset = 0.0
         if self._session_started_at:
             offset = (now - self._session_started_at).total_seconds()
-        self._queue.put((chunk, mic_rms, loopback_rms, self._session_id, now, offset))
-
-    # If transcription falls this many chunks behind realtime, skip the oldest
-    # backlog and jump to the newest so latency can't snowball unbounded. Each
-    # chunk is ~2.5s of advance, so 3 ≈ a ~7.5s recovery ceiling.
-    _MAX_BACKLOG = 3
+        self._queue.put((source, frame, rms, self._session_id, now, offset))
 
     def _worker_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -120,67 +142,23 @@ class WhisperTranscriber:
                 continue
             if item is None:
                 break
-            # Latency cap: if we're badly behind, drop stale chunks and keep the
-            # most recent so the live transcript stays close to realtime.
-            dropped = False
-            while self._queue.qsize() > self._MAX_BACKLOG:
-                nxt = self._queue.get_nowait()
-                self._queue.task_done()
-                if nxt is None:
-                    item = None
-                    break
-                item = nxt
-                dropped = True
-            if item is None:
-                break
-            if dropped:
-                print("[transcriber] backlog cap hit — dropped stale chunks", flush=True)
-            chunk, mic_rms, loopback_rms, session_id, wall_clock, offset = item
-            self._process_chunk(chunk, mic_rms, loopback_rms, session_id, wall_clock, offset)
+            source, frame, rms, session_id, wall_clock, offset = item
+            self._process_chunk(source, frame, rms, session_id, wall_clock, offset)
             self._queue.task_done()
 
     def _process_chunk(
         self,
-        chunk: np.ndarray,
-        mic_rms: float,
-        loopback_rms: float,
+        source: str,
+        frame: np.ndarray,
+        rms: float,
         session_id: str,
         wall_clock: datetime,
         offset: float,
     ) -> None:
-        if self._model is None:
+        if self._model is None or self._vad is None:
             return
-        # VAD gate
-        if self._vad is None or not self._vad.is_speech(chunk):
+        assembler = self._mic_assembler if source == "mic" else self._lb_assembler
+        if assembler is None:
             return
-        # Transcribe
-        try:
-            segments, _info = self._model.transcribe(
-                chunk,
-                beam_size=1,  # greedy — much faster on CPU int8
-                vad_filter=False,  # Silero VAD already gated this chunk; skip whisper's VAD
-                condition_on_previous_text=False,  # avoid latency from carrying context
-                temperature=0.0,
-                word_timestamps=False,
-            )
-            text = " ".join(s.text.strip() for s in segments).strip()
-        except Exception:
-            return
-        if not text or text == self._last_text:
-            return
-        self._last_text = text
-        confidence = 1.0  # faster-whisper doesn't expose no_speech_prob directly in this path
-        speaker = get_speaker(mic_rms, loopback_rms)
-        seg = TranscriptSegment(
-            id=str(uuid.uuid4()),
-            session_id=session_id,
-            speaker=speaker,
-            wall_clock_time=wall_clock,
-            session_offset_seconds=offset,
-            text=text,
-            is_final=True,
-            audio_source="mixed",
-            confidence=confidence,
-        )
-        if self._emit_callback:
-            self._emit_callback(seg)
+        is_speech = self._vad.is_speech_frame(frame)
+        assembler.process(frame, is_speech, wall_clock, offset)

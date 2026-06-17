@@ -6,7 +6,9 @@ import { app } from 'electron';
 
 const PORT = 8001;
 const HEALTH_URL = `http://127.0.0.1:${PORT}/health`;
-const MAX_HEALTH_RETRIES = 30;
+// ~60s at 500ms poll — dual-stream loads two Silero VAD models, so cold model
+// load can exceed the old 15s budget on slower/CPU machines.
+const MAX_HEALTH_RETRIES = 120;
 const HEALTH_POLL_MS = 500;
 const MAX_CRASH_RESTARTS = 3;
 const CRASH_RESTART_DELAY_MS = 2000;

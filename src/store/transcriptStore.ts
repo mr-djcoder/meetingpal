@@ -56,7 +56,15 @@ export const useTranscriptStore = create<TranscriptStore>((set, get) => ({
     set({ isRecording: false }),
 
   addSegment: (segment: TranscriptSegment) =>
-    set((state) => ({ segments: [...state.segments, segment] })),
+    set((state) => {
+      const idx = state.segments.findIndex((s) => s.id === segment.id);
+      if (idx === -1) {
+        return { segments: [...state.segments, segment] };
+      }
+      const next = state.segments.slice();
+      next[idx] = segment;
+      return { segments: next };
+    }),
 
   clearSession: () =>
     set({

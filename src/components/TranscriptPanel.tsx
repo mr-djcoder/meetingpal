@@ -143,7 +143,9 @@ export function TranscriptPanel() {
                   {seg.speaker}
                 </span>
                 <span className="text-xs text-gray-500 flex-shrink-0 mt-0.5">{time}</span>
-                <p className="text-gray-100 leading-relaxed">{seg.text}</p>
+                <p className={`text-gray-100 leading-relaxed${seg.is_final ? '' : ' italic text-gray-400'}`}>
+                  {seg.text}
+                </p>
               </div>
               {inline && (
                 <div className="flex gap-2 items-start transcript-font pl-1">
