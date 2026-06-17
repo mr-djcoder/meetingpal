@@ -129,6 +129,22 @@ bleed entirely. No code work for bleed in this project.
 Future options (not in scope): a cross-source energy-dominance gate (suppress the quieter
 source's frames during clear overlap), or real acoustic echo cancellation on mic capture.
 
+### Multiple remote speakers
+
+All remote participants (e.g. several people on a call) arrive mixed in the **single
+loopback stream**, so v1 labels them all `Them` — no per-person split, on both local and
+cloud. This is fine for the core use case (answering the other side's questions; you rarely
+need to know *which* remote person spoke).
+
+Per-remote-speaker distinction is **out of scope for v1**, noted as a future cloud feature:
+enable Deepgram diarization **on the loopback connection only** → `Them (Speaker 1)`,
+`Them (Speaker 2)`, with the mic connection staying diarize-off (always `You`). This is the
+one place acoustic diarization is the right tool (distinct voices, no source to split on).
+Known caveats for that future work: speaker indices are unstable across pauses, overlap
+among remote speakers is still hard, and no real names. A local equivalent would need
+`pyannote` on the loopback path (CPU-heavy, real-time diarization is hard) — heavier still,
+its own future spec.
+
 ## Key storage
 
 - Deepgram key in **keytar** under account `deepgram-api-key` (same pattern as
