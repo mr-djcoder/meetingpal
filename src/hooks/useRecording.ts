@@ -36,15 +36,32 @@ export function useRecording(): RecordingState {
   }, [isRecording, sessionStartedAt]);
 
   const startRecording = useCallback(async (options: StartSessionOptions = {}) => {
-    const result = await window.electronAPI.startSession(options);
-    const res = result as { session_id: string };
-    startSession(res.session_id);
-  }, [startSession]);
+    try {
+      const result = await window.electronAPI.startSession(options);
+      const res = result as { session_id: string };
+      startSession(res.session_id);
+    } catch (err) {
+      // Start failed (e.g. model still loading → 503, or sidecar down). Don't leave
+      // the UI half-recording; surface a clear message and stay stopped.
+      stopSession();
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        /503|model/i.test(msg)
+          ? 'Transcription model is still loading — wait a few seconds and try again.'
+          : `Could not start recording: ${msg}`
+      );
+    }
+  }, [startSession, stopSession]);
 
   const stopRecording = useCallback(async () => {
-    await window.electronAPI.stopSession();
-    stopSession();
-    useAutoAnswerStore.getState().clear();
+    // Always reset local recording state, even if the sidecar call fails (e.g. the
+    // sidecar crashed mid-record) — otherwise the Stop button gets stuck forever.
+    try {
+      await window.electronAPI.stopSession();
+    } finally {
+      stopSession();
+      useAutoAnswerStore.getState().clear();
+    }
   }, [stopSession]);
 
   return { isRecording, duration, startRecording, stopRecording };

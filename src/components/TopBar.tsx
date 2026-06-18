@@ -28,6 +28,7 @@ export function TopBar({
   const [autoAnswer, setAutoAnswer] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [narrow, setNarrow] = useState(false);
+  const [recError, setRecError] = useState<string | null>(null);
 
   useEffect(() => {
     window.electronAPI
@@ -64,8 +65,14 @@ export function TopBar({
   };
 
   const handleToggle = async () => {
-    if (isRecording) await stopRecording();
-    else await startRecording();
+    try {
+      if (isRecording) await stopRecording();
+      else await startRecording();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Recording error';
+      setRecError(msg);
+      setTimeout(() => setRecError(null), 5000);
+    }
   };
 
   const recordIcon = isRecording ? (
@@ -111,6 +118,15 @@ export function TopBar({
           <span className="flex items-center gap-1.5 text-sm text-gray-300 flex-shrink-0">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
             {formatDuration(duration)}
+          </span>
+        )}
+
+        {recError && (
+          <span
+            title={recError}
+            className="text-xs text-red-400 truncate max-w-[180px] min-w-0"
+          >
+            {recError}
           </span>
         )}
       </div>
