@@ -23,7 +23,7 @@ function createWindow(customTitlebar: boolean): void {
     Menu.setApplicationMenu(null);
   }
   mainWindow = new BrowserWindow({
-    width: 1400,
+    width: 400,  // launch in the compact "mini" layout (narrow mode triggers < 450px)
     height: 900,
     minWidth: 400,
     minHeight: 535,
