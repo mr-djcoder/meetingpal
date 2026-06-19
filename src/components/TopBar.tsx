@@ -29,6 +29,25 @@ export function TopBar({
   const [pinned, setPinned] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [recError, setRecError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+
+  // Poll engine readiness so Start is disabled until the transcription model has
+  // loaded (local) — prevents the silent 503 from starting before ready.
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const s = await window.electronAPI.getEngineStatus();
+        if (!active) return;
+        setReady(Boolean(s.ready));
+        if (s.ready) return; // stop polling once ready
+      } catch { /* sidecar not up yet */ }
+      if (active) timer = setTimeout(poll, 2000);
+    };
+    poll();
+    return () => { active = false; clearTimeout(timer); };
+  }, []);
 
   useEffect(() => {
     window.electronAPI
@@ -100,18 +119,26 @@ export function TopBar({
 
         <button
           onClick={handleToggle}
-          title={isRecording ? 'Stop recording' : 'Start recording'}
+          disabled={!ready && !isRecording}
+          title={
+            !ready && !isRecording
+              ? 'Transcription model loading…'
+              : isRecording ? 'Stop recording' : 'Start recording'
+          }
           className={
-            narrow
+            (narrow
               ? `w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
                   isRecording ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
                 }`
               : `px-4 py-1.5 rounded-full text-sm font-medium transition-colors flex items-center gap-1.5 ${
                   isRecording ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`
+                }`)
+            + (!ready && !isRecording ? ' opacity-50 cursor-not-allowed' : '')
           }
         >
-          {narrow ? recordIcon : isRecording ? 'Stop Recording' : 'Start Recording'}
+          {narrow
+            ? recordIcon
+            : isRecording ? 'Stop Recording' : ready ? 'Start Recording' : 'Loading…'}
         </button>
 
         {isRecording && (

@@ -256,12 +256,18 @@ def store_deepgram_key(body: KeyBody):
 @app.get("/api/engine/status")
 def engine_status():
     device = transcriber.device if transcriber else "unknown"
+    # Cloud needs no local model; local is ready once Whisper has loaded.
+    ready = (
+        prefs.transcription_engine == "cloud"
+        or (transcriber.model_loaded if transcriber else False)
+    )
     return {
         "engine": prefs.transcription_engine,
         "device": "GPU (CUDA)" if device == "cuda" else "CPU" if device == "cpu" else "unknown",
         "model": prefs.whisper_model,
         "mode": prefs.local_transcribe_mode,
         "cloud_provider": prefs.cloud_provider,
+        "ready": ready,
     }
 
 

@@ -91,7 +91,7 @@ interface ElectronAPI {
   getGeminiModels(): Promise<{ models: string[] }>;
   setDeepgramKey(key: string): Promise<void>;
   hasDeepgramKey(): Promise<boolean>;
-  getEngineStatus(): Promise<{ engine: string; device: string; model: string; mode: string; cloud_provider: string }>;
+  getEngineStatus(): Promise<{ engine: string; device: string; model: string; mode: string; cloud_provider: string; ready: boolean }>;
   onTranscriptSegment(cb: (segment: TranscriptSegment) => void): () => void;
   onAudioLevel(cb: (frame: AudioLevelFrame) => void): () => void;
   onAiToken(cb: (token: string) => void): () => void;
