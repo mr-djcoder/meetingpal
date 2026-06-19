@@ -47,6 +47,19 @@ function createWindow(customTitlebar: boolean): void {
     );
   }
 
+  // Forward renderer console warnings/errors + load failures to the main process log
+  // so a blank/broken renderer is diagnosable from the terminal (the detached devtools
+  // is easy to miss). Cheap and dev-only-noisy; keep it.
+  mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    if (level >= 2) console.log(`[renderer-console] ${message} (${sourceId}:${line})`);
+  });
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.log(`[did-fail-load] ${code} ${desc} ${url}`);
+  });
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    console.log(`[render-process-gone] ${JSON.stringify(details)}`);
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -107,6 +120,8 @@ function connectWebSocket(): void {
 
 // ── API request helper ────────────────────────────────────────────────────────
 
+const API_TIMEOUT_MS = 8000;
+
 async function apiRequest<T>(
   method: string,
   path: string,
@@ -116,16 +131,31 @@ async function apiRequest<T>(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Sidecar ${method} ${path} → ${res.status}: ${text}`);
+  // Time-bound the request: without this, a crashed/unreachable sidecar makes fetch
+  // hang forever — which left the Stop button stuck (the renderer awaited stopSession
+  // and never got a resolution/rejection to run its reset).
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Sidecar ${method} ${path} → ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Sidecar ${method} ${path} timed out after ${API_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 // ── IPC Handlers ─────────────────────────────────────────────────────────────

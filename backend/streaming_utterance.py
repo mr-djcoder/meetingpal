@@ -43,10 +43,10 @@ class StreamingUtteranceAssembler:
         session_id: str,
         *,
         speaker: Literal["You", "Them"],
-        partial_interval_s: float = 1.0,
+        partial_interval_s: float = 0.8,
         silence_finalize_s: float = 4.0,
         max_utterance_s: float = 30.0,
-        min_window_s: float = 1.0,
+        min_window_s: float = 0.5,
         beam: int = 1,
     ) -> None:
         self._transcribe_fn = transcribe_fn
