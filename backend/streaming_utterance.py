@@ -16,6 +16,10 @@ from backend.models import TranscriptSegment
 from backend.utterance import clean_text
 
 SAMPLE_RATE = 16000
+# A partial commit never strips the whole window — always retain this much trailing
+# audio so under-decoded hypotheses can't drop speech that hasn't been emitted yet.
+# (finalize transcribes whatever remains.)
+MIN_RETAIN_S = 0.5
 
 TranscribeFn = Callable[..., str]  # (buffer, beam, initial_prompt="") -> str
 EmitFn = Callable[[TranscriptSegment], None]
@@ -132,6 +136,10 @@ class StreamingUtteranceAssembler:
         merged = np.concatenate(self._window)
         frac = min(1.0, len(agreed) / len(hyp_words)) if hyp_words else 1.0
         drop = int(frac * merged.size)
+        # Never strip the whole window on a partial commit — retain a trailing tail so
+        # an under-decoded hypothesis can't drop not-yet-emitted speech.
+        max_drop = max(0, merged.size - int(MIN_RETAIN_S * SAMPLE_RATE))
+        drop = min(drop, max_drop)
         kept = merged[drop:]
         self._committed_audio_s += drop / SAMPLE_RATE
         self._window = [kept] if kept.size else []
