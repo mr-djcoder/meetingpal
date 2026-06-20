@@ -2,8 +2,15 @@
 from __future__ import annotations
 
 import os
-# Fix PyTorch + Intel MKL duplicate OpenMP runtime on Windows
+# Native-stability env: must be set BEFORE torch / ctranslate2 (faster-whisper) load.
+# - KMP_DUPLICATE_LIB_OK: tolerate the duplicate Intel OpenMP runtime on Windows.
+# - OMP/MKL thread caps: torch (Silero VAD) and ctranslate2 (Whisper) each spawn their
+#   own OpenMP pool; uncapped, they oversubscribe the cores and intermittently fault
+#   (0xC0000005). Cap them so the two native runtimes don't fight.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "4")
+os.environ.setdefault("MKL_NUM_THREADS", "4")
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 
 import argparse
 import asyncio
@@ -261,10 +268,13 @@ def engine_status():
         prefs.transcription_engine == "cloud"
         or (transcriber.model_loaded if transcriber else False)
     )
+    # Report the model actually loaded (auto-upgraded to a large model on GPU), falling
+    # back to the configured one before load completes.
+    model = transcriber.active_model if (transcriber and transcriber.model_loaded) else prefs.whisper_model
     return {
         "engine": prefs.transcription_engine,
         "device": "GPU (CUDA)" if device == "cuda" else "CPU" if device == "cpu" else "unknown",
-        "model": prefs.whisper_model,
+        "model": model,
         "mode": prefs.local_transcribe_mode,
         "cloud_provider": prefs.cloud_provider,
         "ready": ready,

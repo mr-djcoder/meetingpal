@@ -17,6 +17,15 @@ from backend.vad import SileroVAD
 DownloadProgressCallback = Callable[[float], None]
 
 
+def _cuda_available() -> bool:
+    """True if a CUDA GPU is usable. torch is already a dependency (Silero VAD)."""
+    try:
+        import torch
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
 class WhisperTranscriber:
     def __init__(
         self,
@@ -46,6 +55,11 @@ class WhisperTranscriber:
             else LegacyUtteranceAssembler
         )
         self._device = "unknown"
+        # On a CUDA GPU, auto-upgrade to a large model (the CPU-tuned base/small model
+        # would waste the hardware). distil-large-v3 ≈ large-v3 accuracy at much higher
+        # speed. The configured model is still used on CPU.
+        self._gpu_model = "distil-large-v3"
+        self._active_model = self._model_name  # the model actually loaded (CPU or GPU)
 
     @property
     def model_loaded(self) -> bool:
@@ -54,6 +68,11 @@ class WhisperTranscriber:
     @property
     def device(self) -> str:
         return self._device
+
+    @property
+    def active_model(self) -> str:
+        """The model actually loaded — may differ from the configured one on GPU."""
+        return self._active_model
 
     def set_transcribe_mode(self, mode: str) -> None:
         """Swap the assembler class. Takes effect on the next session start — cheap,
@@ -75,20 +94,29 @@ class WhisperTranscriber:
         if self._vad is None:
             self._vad = SileroVAD()
 
-        try:
-            self._model = WhisperModel(
-                self._model_name,
-                device="cuda",
-                compute_type="float16",
-            )
-            self._device = "cuda"
-        except Exception:
-            self._model = WhisperModel(
-                self._model_name,
-                device="cpu",
-                compute_type="int8",
-            )
-            self._device = "cpu"
+        # GPU-aware: when CUDA is present, auto-upgrade to the large GPU model; otherwise
+        # use the configured (CPU) model. Either path falls back to CPU int8 on failure.
+        if _cuda_available():
+            try:
+                self._model = WhisperModel(
+                    self._gpu_model,
+                    device="cuda",
+                    compute_type="float16",
+                )
+                self._device = "cuda"
+                self._active_model = self._gpu_model
+                self._model_loaded = True
+                return
+            except Exception:
+                pass  # GPU load failed (e.g. OOM / missing CUDA libs) → fall back to CPU
+        self._model = WhisperModel(
+            self._model_name,
+            device="cpu",
+            compute_type="int8",
+            cpu_threads=4,  # bounded — avoid OpenMP oversubscription (native-stability)
+        )
+        self._device = "cpu"
+        self._active_model = self._model_name
         self._model_loaded = True
 
     def transcribe(self, buffer: np.ndarray, beam_size: int, initial_prompt: str = "") -> str:
