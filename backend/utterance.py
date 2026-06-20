@@ -10,7 +10,6 @@ import numpy as np
 from backend.models import TranscriptSegment
 
 SAMPLE_RATE = 16000
-SENTENCE_END: frozenset[str] = frozenset({".", "?", "!"})
 
 TranscribeFn = Callable[[np.ndarray, int], str]
 EmitFn = Callable[[TranscriptSegment], None]
@@ -26,15 +25,16 @@ def clean_text(text: str) -> str:
     return t
 
 
-class UtteranceAssembler:
+class LegacyUtteranceAssembler:
     def __init__(
         self,
         transcribe_fn: TranscribeFn,
         emit_fn: EmitFn,
         session_id: str,
         *,
+        speaker: Literal["You", "Them"],
         partial_interval_s: float = 1.5,
-        silence_finalize_s: float = 0.7,
+        silence_finalize_s: float = 4.0,
         max_utterance_s: float = 15.0,
         partial_beam: int = 1,
         final_beam: int = 5,
@@ -50,7 +50,7 @@ class UtteranceAssembler:
 
         self._chunks: list[np.ndarray] = []
         self._current_id: str | None = None
-        self._speaker: Literal["You", "Them"] = "You"
+        self._speaker: Literal["You", "Them"] = speaker
         self._silence_run_s = 0.0
         self._audio_since_partial_s = 0.0
         self._last_wall_clock: datetime | None = None
@@ -60,8 +60,6 @@ class UtteranceAssembler:
         self,
         frame: np.ndarray,
         is_speech: bool,
-        mic_rms: float,
-        lb_rms: float,
         wall_clock: datetime,
         offset: float,
     ) -> None:
@@ -71,7 +69,7 @@ class UtteranceAssembler:
 
         if is_speech:
             if self._current_id is None:
-                self._start_utterance(mic_rms, lb_rms)
+                self._start_utterance()
             self._chunks.append(frame)
             self._silence_run_s = 0.0
             self._audio_since_partial_s += frame_s
@@ -83,9 +81,10 @@ class UtteranceAssembler:
             if self._audio_since_partial_s >= self._partial_interval_s:
                 text = self._transcribe(self._partial_beam)
                 self._audio_since_partial_s = 0.0
-                if text and text[-1] in SENTENCE_END:
-                    self._finalize_with(text)
-                elif text:
+                if text:
+                    # Stream a live partial. The line is NOT split on sentence
+                    # punctuation — a whole spoken message stays one line until an
+                    # end-of-turn silence (silence_finalize_s) or the max-length cap.
                     self._emit_segment(text, is_final=False)
         else:
             if self._current_id is not None:
@@ -101,9 +100,8 @@ class UtteranceAssembler:
     def _buffered_s(self) -> float:
         return sum(len(c) for c in self._chunks) / SAMPLE_RATE
 
-    def _start_utterance(self, mic_rms: float, lb_rms: float) -> None:
+    def _start_utterance(self) -> None:
         self._current_id = str(uuid.uuid4())
-        self._speaker = "You" if mic_rms >= lb_rms else "Them"
         self._chunks = []
         self._silence_run_s = 0.0
         self._audio_since_partial_s = 0.0
@@ -138,7 +136,13 @@ class UtteranceAssembler:
             session_offset_seconds=self._last_offset,
             text=text,
             is_final=is_final,
-            audio_source="mixed",
+            audio_source="mic" if self._speaker == "You" else "loopback",
             confidence=1.0,
         )
         self._emit_fn(seg)
+
+
+# Back-compat alias: existing imports of UtteranceAssembler keep working and refer
+# to the proven full-buffer assembler. The streaming variant lives in
+# backend/streaming_utterance.py and is selected by local_transcribe_mode.
+UtteranceAssembler = LegacyUtteranceAssembler

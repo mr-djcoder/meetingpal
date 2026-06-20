@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranscriptStore } from '../store/transcriptStore';
 
 interface AudioDevice {
   index: number;
@@ -17,7 +18,21 @@ interface UserPreferences {
   font_size: number;
   theme: 'dark' | 'light';
   onboarding_completed: boolean;
+  auto_answer_enabled: boolean;
+  auto_answer_prompt: string;
+  auto_answer_provider: string;
+  auto_answer_model: string;
+  custom_titlebar: boolean;
+  transcription_engine: 'local' | 'cloud';
+  cloud_provider: string;
+  local_transcribe_mode: 'streaming' | 'legacy';
 }
+
+const CLAUDE_MODELS = [
+  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 — fast' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
+];
 
 interface Props {
   isOpen: boolean;
@@ -30,7 +45,20 @@ export function Settings({ isOpen, onClose }: Props) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
+  const [hasKey, setHasKey] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [geminiKey, setGeminiKey] = useState('');
+  const [geminiKeySaved, setGeminiKeySaved] = useState(false);
+  const [hasGemini, setHasGemini] = useState(false);
+  const [geminiModels, setGeminiModels] = useState<string[]>([]);
+
+  // Transcription engine state
+  const isRecording = useTranscriptStore((s) => s.isRecording);
+  const [hasDgKey, setHasDgKey] = useState(false);
+  const [dgKeyInput, setDgKeyInput] = useState('');
+  const [cloudAck, setCloudAck] = useState(false);
+  const [dgKeySaved, setDgKeySaved] = useState(false);
+  const [engineStatus, setEngineStatus] = useState<{ device: string; model: string } | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -42,6 +70,17 @@ export function Settings({ isOpen, onClose }: Props) {
       setDraft({});
       setDevices((d as { devices: AudioDevice[] }).devices);
     });
+    window.electronAPI.hasApiKey().then(setHasKey).catch(() => setHasKey(false));
+    window.electronAPI.hasGeminiKey().then(setHasGemini).catch(() => setHasGemini(false));
+    window.electronAPI
+      .getGeminiModels()
+      .then((r) => setGeminiModels(r.models))
+      .catch(() => setGeminiModels([]));
+    window.electronAPI.hasDeepgramKey().then(setHasDgKey).catch(() => setHasDgKey(false));
+    window.electronAPI
+      .getEngineStatus()
+      .then((s) => setEngineStatus({ device: s.device, model: s.model }))
+      .catch(() => setEngineStatus(null));
   }, [isOpen]);
 
   if (!isOpen || !prefs) return null;
@@ -53,8 +92,15 @@ export function Settings({ isOpen, onClose }: Props) {
 
   const handleSave = async () => {
     setSaving(true);
+    const titlebarChanged =
+      draft.custom_titlebar !== undefined && draft.custom_titlebar !== prefs?.custom_titlebar;
     try {
       await window.electronAPI.setPreferences(draft);
+      if (titlebarChanged) {
+        // recreates the window in-place with the new frame (this view is replaced)
+        await window.electronAPI.applyTitlebar(Boolean(merged.custom_titlebar));
+        return;
+      }
       onClose();
     } finally {
       setSaving(false);
@@ -65,8 +111,28 @@ export function Settings({ isOpen, onClose }: Props) {
     if (!apiKey.trim()) return;
     await window.electronAPI.setApiKey(apiKey.trim());
     setApiKey('');
+    setHasKey(true);
     setKeySaved(true);
     setTimeout(() => setKeySaved(false), 2000);
+  };
+
+  const handleSaveGeminiKey = async () => {
+    if (!geminiKey.trim()) return;
+    await window.electronAPI.setGeminiKey(geminiKey.trim());
+    setGeminiKey('');
+    setHasGemini(true);
+    setGeminiKeySaved(true);
+    setTimeout(() => setGeminiKeySaved(false), 2000);
+    window.electronAPI.getGeminiModels().then((r) => setGeminiModels(r.models)).catch(() => {});
+  };
+
+  const handleSaveDeepgramKey = async () => {
+    if (!dgKeyInput.trim()) return;
+    await window.electronAPI.setDeepgramKey(dgKeyInput.trim());
+    setDgKeyInput('');
+    setHasDgKey(true);
+    setDgKeySaved(true);
+    setTimeout(() => setDgKeySaved(false), 2000);
   };
 
   const mics = devices.filter((d) => d.device_type === 'microphone');
@@ -88,6 +154,10 @@ export function Settings({ isOpen, onClose }: Props) {
         <div className="px-6 py-5 space-y-6">
           {/* API Key */}
           <Section title="API Key">
+            <div className="flex items-center gap-1.5 mb-2">
+              <div className={`w-2 h-2 rounded-full ${hasKey ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className="text-xs text-gray-400">{hasKey ? 'API key set' : 'No API key'}</span>
+            </div>
             <div className="flex gap-2">
               <input
                 type="password"
@@ -119,6 +189,95 @@ export function Settings({ isOpen, onClose }: Props) {
             />
           </Section>
 
+          {/* Transcription Engine */}
+          <Section title="Transcription Engine">
+            <div className="space-y-3">
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="transcription_engine"
+                  checked={merged.transcription_engine === 'local'}
+                  disabled={isRecording}
+                  onChange={() => update({ transcription_engine: 'local' })}
+                  className="accent-blue-500"
+                />
+                <span className="text-sm text-gray-300">Local (private, on-device)</span>
+              </label>
+              <label className={`flex items-center gap-2.5 ${hasDgKey && cloudAck ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                <input
+                  type="radio"
+                  name="transcription_engine"
+                  checked={merged.transcription_engine === 'cloud'}
+                  disabled={isRecording || !(hasDgKey && (cloudAck || merged.transcription_engine === 'cloud'))}
+                  onChange={() => update({ transcription_engine: 'cloud' })}
+                  className="accent-blue-500"
+                />
+                <span className="text-sm text-gray-300">Cloud (Deepgram)</span>
+              </label>
+              {isRecording && (
+                <p className="text-xs text-gray-500">Applies on next recording start.</p>
+              )}
+
+              {merged.transcription_engine === 'local' && (
+                <div className="space-y-2 pt-1">
+                  {engineStatus && (
+                    <p className="text-xs text-gray-400">
+                      Engine: Local · Device: {engineStatus.device} · Model: {engineStatus.model}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">Transcription mode:</span>
+                    <select
+                      value={merged.local_transcribe_mode}
+                      disabled={isRecording}
+                      onChange={(e) =>
+                        update({ local_transcribe_mode: e.target.value as 'streaming' | 'legacy' })
+                      }
+                      className="bg-gray-800 text-white rounded-lg px-2 py-1 text-xs border border-gray-600 focus:border-blue-500 outline-none disabled:opacity-50"
+                    >
+                      <option value="streaming">Streaming (faster)</option>
+                      <option value="legacy">Legacy (stable)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {(merged.transcription_engine === 'cloud' || !hasDgKey) && (
+                <div className="space-y-2 border-t border-gray-800 pt-2">
+                  <p className="text-xs text-amber-400 flex gap-1.5">
+                    <span>⚠</span>
+                    <span>Cloud mode streams your meeting audio to Deepgram for transcription.</span>
+                  </p>
+                  <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={cloudAck}
+                      onChange={(e) => setCloudAck(e.target.checked)}
+                      className="accent-blue-500"
+                    />
+                    I understand audio will be sent to Deepgram.
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      placeholder={hasDgKey ? '(key already saved — enter new to replace)' : 'Deepgram API key'}
+                      value={dgKeyInput}
+                      onChange={(e) => setDgKeyInput(e.target.value)}
+                      className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                    />
+                    <button
+                      onClick={handleSaveDeepgramKey}
+                      disabled={!dgKeyInput.trim() || !cloudAck}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                    >
+                      {dgKeySaved ? 'Saved!' : 'Save key'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Section>
+
           {/* Claude Model */}
           <Section title="AI Model">
             <RadioGroup
@@ -129,6 +288,100 @@ export function Settings({ isOpen, onClose }: Props) {
                 { value: 'claude-opus-4-6', label: 'Claude Opus (most capable, slower)' },
               ]}
             />
+          </Section>
+
+          {/* Auto-Answer */}
+          <Section title="Auto-Answer (suggested replies)">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-300">Enable auto-answer</span>
+                <button
+                  onClick={() => update({ auto_answer_enabled: !merged.auto_answer_enabled })}
+                  className={`relative inline-flex h-5 w-9 rounded-full transition-colors ${
+                    merged.auto_answer_enabled ? 'bg-blue-600' : 'bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                      merged.auto_answer_enabled ? 'translate-x-4' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Prompt</label>
+                <textarea
+                  value={merged.auto_answer_prompt}
+                  onChange={(e) => update({ auto_answer_prompt: e.target.value })}
+                  rows={3}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none resize-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Provider</label>
+                <select
+                  value={merged.auto_answer_provider}
+                  onChange={(e) => {
+                    const p = e.target.value;
+                    const model =
+                      p === 'gemini' ? geminiModels[0] ?? 'gemini-3.5-flash' : 'claude-haiku-4-5-20251001';
+                    update({ auto_answer_provider: p, auto_answer_model: model });
+                  }}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                >
+                  <option value="claude">Claude (Anthropic)</option>
+                  <option value="gemini">Gemini (Google)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Model</label>
+                <select
+                  value={merged.auto_answer_model}
+                  onChange={(e) => update({ auto_answer_model: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                >
+                  {merged.auto_answer_provider === 'gemini'
+                    ? geminiModels.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))
+                    : CLAUDE_MODELS.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                </select>
+              </div>
+              {merged.auto_answer_provider === 'gemini' && (
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">
+                    Gemini API Key{' '}
+                    {hasGemini ? (
+                      <span className="text-green-400">(set)</span>
+                    ) : (
+                      <span className="text-red-400">(not set)</span>
+                    )}
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={geminiKey}
+                      onChange={(e) => setGeminiKey(e.target.value)}
+                      placeholder="AIza… (transcript is sent to Google when Gemini is selected)"
+                      className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                    />
+                    <button
+                      onClick={handleSaveGeminiKey}
+                      disabled={!geminiKey.trim()}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                    >
+                      {geminiKeySaved ? 'Saved!' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </Section>
 
           {/* Audio Devices */}
@@ -198,6 +451,34 @@ export function Settings({ isOpen, onClose }: Props) {
                   onChange={(e) => update({ font_size: Number(e.target.value) })}
                   className="w-full accent-blue-500"
                 />
+              </div>
+            </div>
+          </Section>
+
+          {/* Window */}
+          <Section title="Window">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-300">Custom frameless title bar</span>
+                <button
+                  onClick={() => update({ custom_titlebar: !merged.custom_titlebar })}
+                  className={`relative inline-flex h-5 w-9 rounded-full transition-colors ${
+                    merged.custom_titlebar ? 'bg-blue-600' : 'bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                      merged.custom_titlebar ? 'translate-x-4' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+              <div className="text-xs text-amber-300 bg-amber-900/20 border border-amber-800/60 rounded-lg px-3 py-2 flex gap-2">
+                <span>⚠</span>
+                <span>
+                  Changing this <b>reloads the window</b> on Save. Off = standard Windows title bar + menu.
+                  On = slim in-app bar (best for overlay mode, default). The window stays resizable either way.
+                </span>
               </div>
             </div>
           </Section>

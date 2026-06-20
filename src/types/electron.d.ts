@@ -40,6 +40,19 @@ interface UserPreferences {
   font_size: number;
   theme: 'dark' | 'light';
   onboarding_completed: boolean;
+  auto_answer_enabled: boolean;
+  auto_answer_prompt: string;
+  auto_answer_provider: string;
+  auto_answer_model: string;
+  chat_panel_visible: boolean;
+  custom_titlebar: boolean;
+  window_opacity: number;
+  always_on_top: boolean;
+  transcript_split: number;
+  transcript_visible: boolean;
+  transcription_engine: 'local' | 'cloud';
+  cloud_provider: string;
+  local_transcribe_mode: 'streaming' | 'legacy';
 }
 
 interface AudioLevelFrame {
@@ -73,11 +86,27 @@ interface ElectronAPI {
   setPreferences(partial: Partial<UserPreferences>): Promise<UserPreferences>;
   setApiKey(key: string): Promise<void>;
   hasApiKey(): Promise<boolean>;
+  setGeminiKey(key: string): Promise<void>;
+  hasGeminiKey(): Promise<boolean>;
+  getGeminiModels(): Promise<{ models: string[] }>;
+  setDeepgramKey(key: string): Promise<void>;
+  hasDeepgramKey(): Promise<boolean>;
+  getEngineStatus(): Promise<{ engine: string; device: string; model: string; mode: string; cloud_provider: string; ready: boolean }>;
   onTranscriptSegment(cb: (segment: TranscriptSegment) => void): () => void;
   onAudioLevel(cb: (frame: AudioLevelFrame) => void): () => void;
   onAiToken(cb: (token: string) => void): () => void;
   onAiDone(cb: (summary: AiMessageSummary) => void): () => void;
   onError(cb: (error: SidecarError) => void): () => void;
+  onAutoAnswerStart(cb: (m: { question: string }) => void): () => void;
+  onAutoAnswerToken(cb: (m: { text: string }) => void): () => void;
+  onAutoAnswerDone(cb: (m: unknown) => void): () => void;
+  onAutoAnswerError(cb: (m: { message: string }) => void): () => void;
+  windowMinimize(): Promise<void>;
+  windowMaximize(): Promise<void>;
+  windowClose(): Promise<void>;
+  applyTitlebar(custom: boolean): Promise<void>;
+  setOpacity(value: number): Promise<number>;
+  setAlwaysOnTop(value: boolean): Promise<boolean>;
   copyTranscript(sessionId: string): Promise<void>;
   exportTranscript(sessionId: string, format: 'txt' | 'md'): Promise<string | null>;
 }

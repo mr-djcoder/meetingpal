@@ -20,24 +20,25 @@ class Recorder:
         self.segments.append(seg)
 
 
-def build(transcribe_text="hello world", **kw):
+def build(transcribe_text="hello world", speaker="You", **kw):
     rec = Recorder()
     asm = UtteranceAssembler(
         transcribe_fn=lambda buf, beam: transcribe_text,
         emit_fn=rec,
         session_id="s1",
+        speaker=speaker,
         **kw,
     )
     return asm, rec
 
 
-def feed(asm, *, speech: bool, n: int, mic=0.9, lb=0.1):
+def feed(asm, *, speech: bool, n: int):
     for _ in range(n):
-        asm.process(make_frame(), speech, mic, lb, WALL, 0.0)
+        asm.process(make_frame(), speech, WALL, 0.0)
 
 
 def test_silence_gap_finalizes_one_segment():
-    asm, rec = build(transcribe_text="hello world.", partial_interval_s=999)
+    asm, rec = build(transcribe_text="hello world.", partial_interval_s=999, silence_finalize_s=0.7)
     feed(asm, speech=True, n=4)      # 2.0s speech, no partial
     feed(asm, speech=False, n=2)     # 1.0s silence >= 0.7s -> finalize
     assert len(rec.segments) == 1
@@ -49,7 +50,7 @@ def test_silence_gap_finalizes_one_segment():
 
 
 def test_silence_below_threshold_does_not_finalize():
-    asm, rec = build(partial_interval_s=999)
+    asm, rec = build(partial_interval_s=999, silence_finalize_s=0.7)
     feed(asm, speech=True, n=2)
     feed(asm, speech=False, n=1)     # 0.5s silence < 0.7s
     assert rec.segments == []
@@ -64,7 +65,7 @@ def test_partial_emitted_after_interval():
 
 
 def test_partials_share_one_id_then_final_reuses_it():
-    asm, rec = build(transcribe_text="hello", partial_interval_s=1.5)
+    asm, rec = build(transcribe_text="hello", partial_interval_s=1.5, silence_finalize_s=0.7)
     feed(asm, speech=True, n=3)      # partial #1
     feed(asm, speech=True, n=3)      # partial #2
     feed(asm, speech=False, n=2)     # finalize
@@ -74,20 +75,25 @@ def test_partials_share_one_id_then_final_reuses_it():
     assert [s.is_final for s in rec.segments] == [False, False, True]
 
 
-def test_punctuation_promotes_partial_to_final():
+def test_sentence_punctuation_does_not_split_the_line():
+    # A whole message stays one line: a sentence-ending '.' must NOT finalize.
+    # The line settles only on an end-of-turn silence or the max-length cap.
     asm, rec = build(transcribe_text="All done.", partial_interval_s=1.5)
-    feed(asm, speech=True, n=3)      # 1.5s -> transcribe -> ends with '.' -> finalize
+    feed(asm, speech=True, n=3)      # 1.5s -> transcribe; '.' must stay a live partial
     assert len(rec.segments) == 1
-    assert rec.segments[0].is_final is True
+    assert rec.segments[0].is_final is False
     assert rec.segments[0].text == "All done."
 
 
-def test_next_utterance_gets_new_id_after_punctuation_final():
-    asm, rec = build(transcribe_text="Done.", partial_interval_s=1.5)
-    feed(asm, speech=True, n=3)      # finalize utterance 1
-    feed(asm, speech=True, n=3)      # finalize utterance 2
-    assert len(rec.segments) == 2
-    assert rec.segments[0].id != rec.segments[1].id
+def test_two_utterances_separated_by_silence_get_new_ids():
+    asm, rec = build(transcribe_text="Done.", partial_interval_s=999, silence_finalize_s=0.7)
+    feed(asm, speech=True, n=2)      # utterance 1
+    feed(asm, speech=False, n=2)     # 1.0s silence -> finalize 1
+    feed(asm, speech=True, n=2)      # utterance 2
+    feed(asm, speech=False, n=2)     # finalize 2
+    finals = [s for s in rec.segments if s.is_final]
+    assert len(finals) == 2
+    assert finals[0].id != finals[1].id
 
 
 def test_max_length_forces_final_without_silence():
@@ -105,23 +111,20 @@ def test_speech_continues_with_new_id_after_forced_final():
     assert rec.segments[0].id != rec.segments[1].id
 
 
-def test_speaker_from_onset_rms_and_held_for_utterance():
-    asm, rec = build(transcribe_text="hi", partial_interval_s=1.5)
-    # Onset frame: mic louder -> "You". Later frames flip rms; speaker must NOT change.
-    asm.process(make_frame(), True, 0.9, 0.1, WALL, 0.0)   # onset -> You
-    asm.process(make_frame(), True, 0.0, 0.9, WALL, 0.0)
-    asm.process(make_frame(), True, 0.0, 0.9, WALL, 0.0)   # triggers partial
-    asm.process(make_frame(), False, 0.0, 0.0, WALL, 0.0)
-    asm.process(make_frame(), False, 0.0, 0.0, WALL, 0.0)  # finalize
-    assert all(s.speaker == "You" for s in rec.segments)
+def test_assembler_emits_its_constructed_speaker_you():
+    asm, rec = build(transcribe_text="hi", speaker="You", partial_interval_s=1.5, silence_finalize_s=0.7)
+    feed(asm, speech=True, n=3)      # partial
+    feed(asm, speech=False, n=2)     # finalize
+    assert rec.segments and all(s.speaker == "You" for s in rec.segments)
+    assert all(s.audio_source == "mic" for s in rec.segments)
 
 
-def test_speaker_them_when_loopback_louder_at_onset():
-    asm, rec = build(transcribe_text="hi.", partial_interval_s=1.5)
-    asm.process(make_frame(), True, 0.1, 0.9, WALL, 0.0)   # onset -> Them
-    asm.process(make_frame(), True, 0.1, 0.9, WALL, 0.0)
-    asm.process(make_frame(), True, 0.1, 0.9, WALL, 0.0)   # partial -> '.' -> final
+def test_assembler_emits_its_constructed_speaker_them():
+    asm, rec = build(transcribe_text="hi", speaker="Them", partial_interval_s=1.5, silence_finalize_s=0.7)
+    feed(asm, speech=True, n=3)
+    feed(asm, speech=False, n=2)
     assert rec.segments and all(s.speaker == "Them" for s in rec.segments)
+    assert all(s.audio_source == "loopback" for s in rec.segments)
 
 
 def test_flush_finalizes_active_utterance():
@@ -139,7 +142,7 @@ def test_flush_noop_when_idle():
 
 
 def test_empty_transcription_is_dropped():
-    asm, rec = build(transcribe_text="   ", partial_interval_s=999)
+    asm, rec = build(transcribe_text="   ", partial_interval_s=999, silence_finalize_s=0.7)
     feed(asm, speech=True, n=2)
     feed(asm, speech=False, n=2)     # finalize, but text is blank
     assert rec.segments == []

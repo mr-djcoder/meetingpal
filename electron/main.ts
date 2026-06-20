@@ -1,10 +1,12 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron';
 import * as path from 'path';
 import * as keytar from 'keytar';
 import { SidecarManager } from './sidecar';
 
 const KEYTAR_SERVICE = 'MeetingPal';
 const KEYTAR_ACCOUNT = 'anthropic-api-key';
+const GEMINI_ACCOUNT = 'gemini-api-key';
+const DEEPGRAM_ACCOUNT = 'deepgram-api-key';
 const SIDECAR_PORT = 8001;
 const BASE_URL = `http://127.0.0.1:${SIDECAR_PORT}`;
 
@@ -14,14 +16,20 @@ let wsConnection: import('ws').WebSocket | null = null;
 
 // ── Window ────────────────────────────────────────────────────────────────────
 
-function createWindow(): void {
+function createWindow(customTitlebar: boolean): void {
+  // `frame` is fixed at creation; when the custom title bar is on we drop the OS
+  // frame + menu and the renderer draws its own bar. Window stays resizable.
+  if (customTitlebar) {
+    Menu.setApplicationMenu(null);
+  }
   mainWindow = new BrowserWindow({
-    width: 1400,
+    width: 400,  // launch in the compact "mini" layout (narrow mode triggers < 450px)
     height: 900,
-    minWidth: 900,
-    minHeight: 600,
+    minWidth: 400,
+    minHeight: 535,
     backgroundColor: '#111827',
-    titleBarStyle: 'hiddenInset',
+    frame: !customTitlebar,
+    resizable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -38,6 +46,19 @@ function createWindow(): void {
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
     );
   }
+
+  // Forward renderer console warnings/errors + load failures to the main process log
+  // so a blank/broken renderer is diagnosable from the terminal (the detached devtools
+  // is easy to miss). Cheap and dev-only-noisy; keep it.
+  mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    if (level >= 2) console.log(`[renderer-console] ${message} (${sourceId}:${line})`);
+  });
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.log(`[did-fail-load] ${code} ${desc} ${url}`);
+  });
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    console.log(`[render-process-gone] ${JSON.stringify(details)}`);
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -71,6 +92,18 @@ function connectWebSocket(): void {
         case 'model_download_progress':
           mainWindow.webContents.send('model-download-progress', msg);
           break;
+        case 'auto_answer_start':
+          mainWindow.webContents.send('auto-answer-start', msg);
+          break;
+        case 'auto_answer_token':
+          mainWindow.webContents.send('auto-answer-token', msg);
+          break;
+        case 'auto_answer_done':
+          mainWindow.webContents.send('auto-answer-done', msg);
+          break;
+        case 'auto_answer_error':
+          mainWindow.webContents.send('auto-answer-error', msg);
+          break;
       }
     } catch {
       // ignore malformed messages
@@ -87,6 +120,8 @@ function connectWebSocket(): void {
 
 // ── API request helper ────────────────────────────────────────────────────────
 
+const API_TIMEOUT_MS = 8000;
+
 async function apiRequest<T>(
   method: string,
   path: string,
@@ -96,16 +131,31 @@ async function apiRequest<T>(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Sidecar ${method} ${path} → ${res.status}: ${text}`);
+  // Time-bound the request: without this, a crashed/unreachable sidecar makes fetch
+  // hang forever — which left the Stop button stuck (the renderer awaited stopSession
+  // and never got a resolution/rejection to run its reset).
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Sidecar ${method} ${path} → ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Sidecar ${method} ${path} timed out after ${API_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 // ── IPC Handlers ─────────────────────────────────────────────────────────────
@@ -180,12 +230,45 @@ ipcMain.handle('set-preferences', (_e, partial) =>
 
 ipcMain.handle('set-api-key', async (_e, key: string) => {
   await keytar.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key);
+  try {
+    await apiRequest('POST', '/api/key', { api_key: key });
+  } catch {
+    // sidecar may not be ready yet; startup sync will retry
+  }
 });
 
 ipcMain.handle('has-api-key', async () => {
   const key = await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
   return key !== null && key.length > 0;
 });
+
+ipcMain.handle('set-gemini-key', async (_e, key: string) => {
+  await keytar.setPassword(KEYTAR_SERVICE, GEMINI_ACCOUNT, key);
+  await apiRequest('POST', '/api/key/gemini', { api_key: key });
+});
+
+ipcMain.handle('has-gemini-key', async () => {
+  const key = await keytar.getPassword(KEYTAR_SERVICE, GEMINI_ACCOUNT);
+  return key !== null && key.length > 0;
+});
+
+ipcMain.handle('get-gemini-models', () => apiRequest('GET', '/api/gemini/models'));
+
+ipcMain.handle('set-deepgram-key', async (_e, key: string) => {
+  await keytar.setPassword(KEYTAR_SERVICE, DEEPGRAM_ACCOUNT, key);
+  try {
+    await apiRequest('POST', '/api/key/deepgram', { api_key: key });
+  } catch {
+    // sidecar may not be ready yet; startup sync will retry
+  }
+});
+
+ipcMain.handle('has-deepgram-key', async () => {
+  const key = await keytar.getPassword(KEYTAR_SERVICE, DEEPGRAM_ACCOUNT);
+  return key !== null && key.length > 0;
+});
+
+ipcMain.handle('get-engine-status', () => apiRequest('GET', '/api/engine/status'));
 
 ipcMain.handle('copy-transcript', async (_e, sessionId: string) => {
   const data = await apiRequest<{ segments: Array<{ speaker: string; wall_clock_time: string; text: string }> }>(
@@ -242,13 +325,69 @@ ipcMain.handle('export-transcript', async (_e, { sessionId, format }: { sessionI
 
 ipcMain.handle('open-folder', (_e, folderPath: string) => shell.openPath(folderPath));
 
+// Custom title bar window controls
+ipcMain.handle('window-minimize', () => mainWindow?.minimize());
+ipcMain.handle('window-maximize', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  else mainWindow.maximize();
+});
+ipcMain.handle('window-close', () => mainWindow?.close());
+
+ipcMain.handle('set-opacity', (_e, value: number) => {
+  const clamped = Math.min(1, Math.max(0.05, Number(value)));
+  mainWindow?.setOpacity(clamped);
+  return clamped;
+});
+
+ipcMain.handle('set-always-on-top', (_e, value: boolean) => {
+  const on = Boolean(value);
+  // 'screen-saver' level keeps the window above other apps' normal windows on
+  // Windows; the default 'floating' level loses focus to other foreground apps.
+  mainWindow?.setAlwaysOnTop(on, 'screen-saver');
+  return on;
+});
+
+// Apply the frame setting by recreating the window in-place. `frame` is fixed at
+// creation, but a full app.relaunch() would kill the Vite dev server in dev and
+// leave a blank window — recreating keeps the dev server (and sidecar) alive.
+ipcMain.handle('apply-titlebar', (_e, custom: boolean) => {
+  const old = mainWindow;
+  old?.removeAllListeners('closed'); // don't let the old window null out the new one
+  createWindow(Boolean(custom));
+  old?.destroy();
+});
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
+
+// Push stored keys into the sidecar's memory so auto-answer (server-initiated,
+// no request header) can use them. The Claude key is otherwise sent per-request.
+async function syncKeysToSidecar(): Promise<void> {
+  try {
+    const claude = await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    if (claude) await apiRequest('POST', '/api/key', { api_key: claude });
+    const gemini = await keytar.getPassword(KEYTAR_SERVICE, GEMINI_ACCOUNT);
+    if (gemini) await apiRequest('POST', '/api/key/gemini', { api_key: gemini });
+    const deepgram = await keytar.getPassword(KEYTAR_SERVICE, DEEPGRAM_ACCOUNT);
+    if (deepgram) await apiRequest('POST', '/api/key/deepgram', { api_key: deepgram });
+  } catch (err) {
+    console.error('Failed to sync keys to sidecar:', err);
+  }
+}
 
 app.on('ready', async () => {
   try {
     await sidecar.spawn();
     connectWebSocket();
-    createWindow();
+    await syncKeysToSidecar();
+    let customTitlebar = false;
+    try {
+      const prefs = await apiRequest<{ custom_titlebar?: boolean }>('GET', '/api/preferences');
+      customTitlebar = Boolean(prefs.custom_titlebar);
+    } catch {
+      // fall back to the standard OS frame
+    }
+    createWindow(customTitlebar);
   } catch (err) {
     console.error('Failed to start sidecar:', err);
     app.quit();

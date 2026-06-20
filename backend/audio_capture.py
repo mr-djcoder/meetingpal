@@ -134,27 +134,19 @@ class AudioCapture:
             stream.close()
 
     def _emit_chunks(self) -> None:
-        """Drain contiguous, non-overlapping 0.5s mixed frames as audio arrives."""
+        """Drain contiguous 0.5s frames from each source independently (no mixing)."""
         import time
         while not self._stop_event.is_set():
             time.sleep(0.05)
             with self._lock:
-                have = min(len(self._mic_buffer), len(self._loopback_buffer))
-                if have < FRAME_SAMPLES:
-                    continue
-                mic_frame = np.array(
-                    [self._mic_buffer.popleft() for _ in range(FRAME_SAMPLES)],
-                    dtype=np.float32,
-                )
-                lb_frame = np.array(
-                    [self._loopback_buffer.popleft() for _ in range(FRAME_SAMPLES)],
-                    dtype=np.float32,
-                )
+                mic_frame = drain_frame(self._mic_buffer, FRAME_SAMPLES)
+                lb_frame = drain_frame(self._loopback_buffer, FRAME_SAMPLES)
                 mic_rms = self.get_mic_rms()
                 lb_rms = self.get_loopback_rms()
-            frame = mix_frame(mic_frame, lb_frame)
-            if len(frame) > 0:
-                self._chunk_callback(frame, mic_rms, lb_rms)
+            if mic_frame is not None:
+                self._chunk_callback("mic", mic_frame, mic_rms)
+            if lb_frame is not None:
+                self._chunk_callback("loopback", lb_frame, lb_rms)
 
     def _get_default_mic_info(self) -> dict:
         try:
@@ -174,24 +166,15 @@ class AudioCapture:
             raise RuntimeError("No WASAPI loopback device found")
 
 
-def mix_frame(mic: np.ndarray, lb: np.ndarray) -> np.ndarray:
-    """Sum mic + loopback at half gain, right-justified by recency, zero-padded.
+def drain_frame(buffer: deque, n: int) -> np.ndarray | None:
+    """Pop exactly n samples from the front of buffer as a float32 array.
 
-    The two sources may differ slightly in length; align both to the longer
-    length by zero-padding the front of the shorter one, then sum at half gain.
+    Returns None (leaving the buffer untouched) when fewer than n samples
+    are available.
     """
-    n = max(len(mic), len(lb))
-    if n == 0:
-        return np.empty(0, dtype=np.float32)
-
-    def _pad(arr: np.ndarray) -> np.ndarray:
-        a = np.asarray(arr, dtype=np.float32)
-        if len(a) < n:
-            a = np.concatenate([np.zeros(n - len(a), dtype=np.float32), a])
-        return a
-
-    mixed = _pad(mic) * 0.5 + _pad(lb) * 0.5
-    return np.clip(mixed, -1.0, 1.0).astype(np.float32)
+    if len(buffer) < n:
+        return None
+    return np.array([buffer.popleft() for _ in range(n)], dtype=np.float32)
 
 
 def enumerate_devices(pa: pyaudio.PyAudio | None = None) -> list[AudioDevice]:

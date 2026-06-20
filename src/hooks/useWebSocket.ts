@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAutoAnswerStore } from '../store/autoAnswerStore';
 import { useChatStore } from '../store/chatStore';
 import { useTranscriptStore } from '../store/transcriptStore';
 
@@ -46,7 +47,26 @@ export function useWebSocket(): AudioLevels {
       console.error('[sidecar error]', error);
     });
 
-    cleanupRefs.current = [offTranscript, offAudio, offToken, offDone, offError];
+    const aa = useAutoAnswerStore.getState;
+    const ts = useTranscriptStore.getState;
+    const offAaStart = api.onAutoAnswerStart((m) => {
+      aa().start(m.question);
+      ts().startInlineAnswer();
+    });
+    const offAaToken = api.onAutoAnswerToken((m) => {
+      aa().appendToken(m.text);
+      ts().appendInlineToken(m.text);
+    });
+    const offAaDone = api.onAutoAnswerDone(() => {
+      aa().done();
+      ts().finishInlineAnswer();
+    });
+    const offAaError = api.onAutoAnswerError((m) => aa().setError(m.message));
+
+    cleanupRefs.current = [
+      offTranscript, offAudio, offToken, offDone, offError,
+      offAaStart, offAaToken, offAaDone, offAaError,
+    ];
     return () => {
       cleanupRefs.current.forEach((fn) => fn());
     };

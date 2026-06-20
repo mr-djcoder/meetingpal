@@ -24,7 +24,7 @@ DEFAULT_SAVE_PATH = str(
 @dataclass
 class UserPreferences:
     whisper_model: Literal["base.en", "small.en", "medium.en"] = "base.en"
-    claude_model: Literal["claude-sonnet-4-6", "claude-opus-4-6"] = "claude-sonnet-4-6"
+    claude_model: str = "claude-sonnet-4-6"  # widened — new Claude IDs (haiku-4-5, opus-4-8)
     mic_device_index: int | None = None
     loopback_device_index: int | None = None
     auto_save: bool = True
@@ -32,6 +32,22 @@ class UserPreferences:
     font_size: int = 14
     theme: Literal["dark", "light"] = "dark"
     onboarding_completed: bool = False
+    auto_answer_enabled: bool = False
+    auto_answer_prompt: str = (
+        "You are me in this conversation. Answer the other person's question "
+        "concisely, in the first person, using the meeting context."
+    )
+    auto_answer_provider: str = "claude"
+    auto_answer_model: str = "claude-haiku-4-5-20251001"
+    chat_panel_visible: bool = True
+    custom_titlebar: bool = True
+    window_opacity: float = 1.0
+    always_on_top: bool = False
+    transcription_engine: Literal["local", "cloud"] = "local"
+    cloud_provider: str = "deepgram"
+    local_transcribe_mode: Literal["streaming", "legacy"] = "streaming"
+    transcript_split: float = 60.0  # % width of the transcript panel
+    transcript_visible: bool = False
 
 
 def load_preferences() -> UserPreferences:

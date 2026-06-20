@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranscriptStore } from '../store/transcriptStore';
 
 export function TranscriptPanel() {
-  const { segments, sessionId, isRecording } = useTranscriptStore();
+  const { segments, sessionId, isRecording, inlineAnswers } = useTranscriptStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [userScrolled, setUserScrolled] = useState(false);
@@ -14,7 +14,7 @@ export function TranscriptPanel() {
     if (!userScrolled) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [segments, userScrolled]);
+  }, [segments, inlineAnswers, userScrolled]);
 
   const handleScroll = () => {
     const el = containerRef.current;
@@ -81,7 +81,7 @@ export function TranscriptPanel() {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 py-3 space-y-2"
+        className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2"
       >
         {segments.length === 0 && (
           <p className="text-gray-500 text-sm text-center mt-8">
@@ -97,19 +97,37 @@ export function TranscriptPanel() {
             second: '2-digit',
           });
           const isYou = seg.speaker === 'You';
+          const inline = inlineAnswers[seg.id];
           return (
-            <div key={seg.id} className="flex gap-2 items-start transcript-font">
-              <span
-                className={`mt-0.5 flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded ${
-                  isYou
-                    ? 'bg-blue-900 text-blue-300'
-                    : 'bg-gray-700 text-gray-300'
-                }`}
-              >
-                {seg.speaker}
-              </span>
-              <span className="text-xs text-gray-500 flex-shrink-0 mt-0.5">{time}</span>
-              <p className={`text-gray-100 leading-relaxed${seg.is_final ? "" : " italic text-gray-400"}`}>{seg.text}</p>
+            <div key={seg.id} className="space-y-1">
+              <div className="flex gap-2 items-start transcript-font">
+                <span
+                  className={`mt-0.5 flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded ${
+                    isYou
+                      ? 'bg-blue-900 text-blue-300'
+                      : 'bg-gray-700 text-gray-300'
+                  }`}
+                >
+                  {seg.speaker}
+                </span>
+                <span className="text-xs text-gray-500 flex-shrink-0 mt-0.5">{time}</span>
+                <p className={`text-gray-100 leading-relaxed${seg.is_final ? '' : ' italic text-gray-400'}`}>
+                  {seg.text}
+                </p>
+              </div>
+              {inline && (
+                <div className="flex gap-2 items-start transcript-font pl-1">
+                  <span className="mt-0.5 flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded bg-emerald-900 text-emerald-300">
+                    AI
+                  </span>
+                  <p className="text-emerald-100 leading-relaxed">
+                    {inline.text}
+                    {inline.streaming && (
+                      <span className="inline-block w-1.5 h-4 ml-0.5 bg-emerald-400 animate-pulse align-text-bottom" />
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
           );
         })}

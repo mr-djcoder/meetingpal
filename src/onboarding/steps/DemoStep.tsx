@@ -25,7 +25,8 @@ export function DemoStep({ onNext, onBack }: Props) {
     let i = 0;
     const interval = setInterval(() => {
       if (i < MOCK_SEGMENTS.length) {
-        setVisibleSegments((v) => [...v, MOCK_SEGMENTS[i]]);
+        const seg = MOCK_SEGMENTS[i];
+        setVisibleSegments((v) => [...v, seg]);
         i++;
       } else {
         clearInterval(interval);

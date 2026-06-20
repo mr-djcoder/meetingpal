@@ -57,7 +57,7 @@ export function AIChatPanel() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
         {messages.length === 0 && !isStreaming && (
           <div className="text-center mt-8 space-y-2">
             <p className="text-gray-400 text-sm">Ask me anything about the meeting.</p>

@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AIChatPanel } from './components/AIChatPanel';
-import { AudioVisualizer } from './components/AudioVisualizer';
+import { CustomTitleBar } from './components/CustomTitleBar';
 import { Settings } from './components/Settings';
+import { SuggestedAnswerPanel } from './components/SuggestedAnswerPanel';
 import { TopBar } from './components/TopBar';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 import { OnboardingWizard } from './onboarding/OnboardingWizard';
-import { useTranscriptStore } from './store/transcriptStore';
 
 interface SidecarError {
   type: 'error';
@@ -21,9 +21,15 @@ interface ModelDownloadProgress {
 }
 
 function MainLayout() {
-  const audioLevels = useWebSocket();
-  const { isRecording } = useTranscriptStore();
+  useWebSocket(); // sets up transcript + auto-answer IPC subscriptions
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [autoAnswerOn, setAutoAnswerOn] = useState(false);
+  const [chatVisible, setChatVisible] = useState(true);
+  const [transcriptVisible, setTranscriptVisible] = useState(false);
+  const [customTitlebar, setCustomTitlebar] = useState(false);
+  const [splitPct, setSplitPct] = useState(60);
+  const [opacityPct, setOpacityPct] = useState(100);
+  const panelsRef = useRef<HTMLDivElement>(null);
   const [errorBanner, setErrorBanner] = useState<SidecarError | null>(null);
   const [errorModal, setErrorModal] = useState<SidecarError | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
@@ -65,12 +71,88 @@ function MainLayout() {
       document.documentElement.classList.toggle('dark', p.theme === 'dark');
       document.documentElement.classList.toggle('light', p.theme === 'light');
       document.documentElement.style.setProperty('--transcript-font-size', `${p.font_size}px`);
+      const aa = prefs as unknown as {
+        auto_answer_enabled?: boolean;
+        chat_panel_visible?: boolean;
+        custom_titlebar?: boolean;
+        window_opacity?: number;
+        transcript_split?: number;
+        transcript_visible?: boolean;
+      };
+      setAutoAnswerOn(Boolean(aa.auto_answer_enabled));
+      setChatVisible(aa.chat_panel_visible ?? true);
+      setTranscriptVisible(Boolean(aa.transcript_visible));
+      setCustomTitlebar(Boolean(aa.custom_titlebar));
+      setSplitPct(aa.transcript_split ?? 60);
+      setOpacityPct(Math.round((aa.window_opacity ?? 1) * 100));
+      window.electronAPI.setOpacity(aa.window_opacity ?? 1);
     });
   }, [settingsOpen]); // re-apply after settings close
 
+  const changeOpacity = (pct: number) => {
+    setOpacityPct(pct);
+    const frac = pct / 100;
+    window.electronAPI.setOpacity(frac);
+    window.electronAPI.setPreferences({ window_opacity: frac } as never);
+  };
+
+  const toggleChat = () => {
+    const next = !chatVisible;
+    setChatVisible(next);
+    window.electronAPI.setPreferences({ chat_panel_visible: next } as never);
+  };
+
+  const toggleTranscript = () => {
+    const next = !transcriptVisible;
+    setTranscriptVisible(next);
+    window.electronAPI.setPreferences({ transcript_visible: next } as never);
+  };
+
+  const startDividerDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => {
+      const rect = panelsRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return;
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      setSplitPct(Math.min(80, Math.max(20, pct)));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setSplitPct((p) => {
+        window.electronAPI.setPreferences({ transcript_split: p } as never);
+        return p;
+      });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-gray-100 overflow-hidden">
-      <TopBar onSettingsOpen={() => setSettingsOpen(true)} />
+      {customTitlebar && <CustomTitleBar />}
+      <TopBar
+        onSettingsOpen={() => setSettingsOpen(true)}
+        chatVisible={chatVisible}
+        onToggleChat={toggleChat}
+        transcriptVisible={transcriptVisible}
+        onToggleTranscript={toggleTranscript}
+        customTitlebar={customTitlebar}
+      />
+
+      {/* Window opacity — always available, panel-independent */}
+      <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-900 border-b border-gray-800">
+        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Opacity</span>
+        <input
+          type="range"
+          min={5}
+          max={100}
+          value={opacityPct}
+          onChange={(e) => changeOpacity(Number(e.target.value))}
+          className="flex-1 accent-blue-500"
+        />
+        <span className="text-xs text-gray-400 w-9 text-right">{opacityPct}%</span>
+      </div>
 
       {/* Error banner (recoverable) */}
       {errorBanner && (
@@ -97,18 +179,32 @@ function MainLayout() {
         </div>
       )}
 
-      {/* Main panels */}
-      <div className="flex-1 grid overflow-hidden" style={{ gridTemplateColumns: '60fr 40fr' }}>
-        <TranscriptPanel />
-        <AIChatPanel />
+      {/* Main panels — draggable split; each panel independently toggleable */}
+      <div ref={panelsRef} className="flex-1 flex overflow-hidden">
+        {transcriptVisible && (
+          <div
+            className="h-full overflow-hidden"
+            style={{ width: chatVisible ? `${splitPct}%` : '100%' }}
+          >
+            <TranscriptPanel />
+          </div>
+        )}
+        {transcriptVisible && chatVisible && (
+          <div
+            onMouseDown={startDividerDrag}
+            title="Drag to resize"
+            className="w-1.5 flex-shrink-0 cursor-col-resize bg-gray-700 hover:bg-blue-500 transition-colors"
+          />
+        )}
+        {chatVisible && (
+          <div className="h-full overflow-hidden flex-1">
+            <AIChatPanel />
+          </div>
+        )}
       </div>
 
-      {/* Audio visualizer — shown when recording */}
-      {isRecording && (
-        <div className="border-t border-gray-700 px-4 py-2 bg-gray-900">
-          <AudioVisualizer micLevel={audioLevels.mic} loopbackLevel={audioLevels.loopback} />
-        </div>
-      )}
+      {/* Auto-answer suggested-answer band */}
+      {autoAnswerOn && <SuggestedAnswerPanel />}
 
       {/* Settings modal */}
       <Settings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />

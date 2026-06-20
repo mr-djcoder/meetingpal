@@ -2,8 +2,15 @@
 from __future__ import annotations
 
 import os
-# Fix PyTorch + Intel MKL duplicate OpenMP runtime on Windows
+# Native-stability env: must be set BEFORE torch / ctranslate2 (faster-whisper) load.
+# - KMP_DUPLICATE_LIB_OK: tolerate the duplicate Intel OpenMP runtime on Windows.
+# - OMP/MKL thread caps: torch (Silero VAD) and ctranslate2 (Whisper) each spawn their
+#   own OpenMP pool; uncapped, they oversubscribe the cores and intermittently fault
+#   (0xC0000005). Cap them so the two native runtimes don't fight.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "4")
+os.environ.setdefault("MKL_NUM_THREADS", "4")
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 
 import argparse
 import asyncio
@@ -22,7 +29,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.audio_capture import AudioCapture, enumerate_devices
+from backend.auto_answer import AutoAnswerOrchestrator
 from backend.claude_client import ClaudeClient
+from backend.gemini_client import GeminiClient, list_gemini_models
 from backend.models import ChatMessage, RecordingSession, TranscriptSegment
 from backend.storage import UserPreferences, load_preferences, save_preferences, save_session
 from backend.transcriber import WhisperTranscriber
@@ -32,10 +41,17 @@ from backend.transcriber import WhisperTranscriber
 transcriber: WhisperTranscriber | None = None
 audio_capture: AudioCapture | None = None
 active_session: RecordingSession | None = None
+active_backend = None  # LocalBackend or DeepgramBackend for the running session
 connected_websockets: set[WebSocket] = set()
 prefs: UserPreferences = UserPreferences()
-_api_key_memory: str | None = None  # held in-process only, never on disk
+_api_key_memory: str | None = None  # Claude key, held in-process only, never on disk
+_gemini_key_memory: str | None = None  # Gemini key, in-process only
+_deepgram_key_memory: str | None = None  # Deepgram key, in-process only
 event_loop: asyncio.AbstractEventLoop | None = None  # captured at startup for cross-thread scheduling
+
+_claude_client = ClaudeClient()
+_gemini_client = GeminiClient()
+auto_answer: AutoAnswerOrchestrator | None = None  # created at startup
 
 SIDECAR_VERSION = "1.0.0"
 
@@ -45,12 +61,14 @@ SIDECAR_VERSION = "1.0.0"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global transcriber, prefs, event_loop
+    global transcriber, prefs, event_loop, auto_answer
     event_loop = asyncio.get_running_loop()
+    auto_answer = AutoAnswerOrchestrator(_broadcast)
     prefs = load_preferences()
     transcriber = WhisperTranscriber(
         model_name=prefs.whisper_model,
         emit_callback=_on_transcript_segment,
+        transcribe_mode=prefs.local_transcribe_mode,
     )
     # Load model in background so health returns model_loaded=false while loading
     event_loop.run_in_executor(None, transcriber.load_model, None)
@@ -108,6 +126,25 @@ def _on_transcript_segment(seg: TranscriptSegment) -> None:
     event_loop.call_soon_threadsafe(
         lambda: asyncio.ensure_future(_broadcast(seg.to_ws_dict()))
     )
+    # Auto-answer: on a finalized question from the other party, the orchestrator
+    # decides whether to fire (enabled / Them / is-question / min-interval).
+    if auto_answer is not None and prefs.auto_answer_enabled and active_session is not None:
+        segments_snapshot = list(active_session.segments)
+        history_snapshot = list(active_session.chat_messages)
+        event_loop.call_soon_threadsafe(
+            lambda: asyncio.ensure_future(
+                auto_answer.maybe_answer(
+                    segment=seg,
+                    prefs=prefs,
+                    claude_key=_api_key_memory,
+                    gemini_key=_gemini_key_memory,
+                    claude_client=_claude_client,
+                    gemini_client=_gemini_client,
+                    segments=segments_snapshot,
+                    history=history_snapshot,
+                )
+            )
+        )
 
 
 def _require_api_key(request: Request) -> str:
@@ -157,6 +194,19 @@ class PrefsUpdate(BaseModel):
     font_size: int | None = None
     theme: str | None = None
     onboarding_completed: bool | None = None
+    auto_answer_enabled: bool | None = None
+    auto_answer_prompt: str | None = None
+    auto_answer_provider: str | None = None
+    auto_answer_model: str | None = None
+    chat_panel_visible: bool | None = None
+    custom_titlebar: bool | None = None
+    window_opacity: float | None = None
+    always_on_top: bool | None = None
+    transcript_split: float | None = None
+    transcript_visible: bool | None = None
+    transcription_engine: str | None = None
+    cloud_provider: str | None = None
+    local_transcribe_mode: str | None = None
 
 
 @app.put("/api/preferences")
@@ -172,6 +222,10 @@ def update_preferences(body: PrefsUpdate):
     if "whisper_model" in data and data["whisper_model"] != old_model and transcriber and event_loop:
         event_loop.run_in_executor(None, transcriber.load_model, prefs.whisper_model)
         _flush(f"[prefs] reloading Whisper model: {prefs.whisper_model}")
+    # Swap the local assembler (streaming/legacy kill-switch) — cheap, applies next session.
+    if "local_transcribe_mode" in data and transcriber:
+        transcriber.set_transcribe_mode(prefs.local_transcribe_mode)
+        _flush(f"[prefs] local transcribe mode: {prefs.local_transcribe_mode}")
     return asdict(prefs)
 
 
@@ -190,6 +244,52 @@ def store_key(body: KeyBody):
     return {"stored": True}
 
 
+@app.post("/api/key/gemini")
+def store_gemini_key(body: KeyBody):
+    global _gemini_key_memory
+    _gemini_key_memory = body.api_key
+    _flush("[key] Gemini API key stored in memory")
+    return {"stored": True}
+
+
+@app.post("/api/key/deepgram")
+def store_deepgram_key(body: KeyBody):
+    global _deepgram_key_memory
+    _deepgram_key_memory = body.api_key
+    _flush("[key] Deepgram API key stored in memory")
+    return {"stored": True}
+
+
+@app.get("/api/engine/status")
+def engine_status():
+    device = transcriber.device if transcriber else "unknown"
+    # Cloud needs no local model; local is ready once Whisper has loaded.
+    ready = (
+        prefs.transcription_engine == "cloud"
+        or (transcriber.model_loaded if transcriber else False)
+    )
+    # Report the model actually loaded (auto-upgraded to a large model on GPU), falling
+    # back to the configured one before load completes.
+    model = transcriber.active_model if (transcriber and transcriber.model_loaded) else prefs.whisper_model
+    return {
+        "engine": prefs.transcription_engine,
+        "device": "GPU (CUDA)" if device == "cuda" else "CPU" if device == "cpu" else "unknown",
+        "model": model,
+        "mode": prefs.local_transcribe_mode,
+        "cloud_provider": prefs.cloud_provider,
+        "ready": ready,
+    }
+
+
+@app.get("/api/gemini/models")
+async def gemini_models():
+    """List Gemini models for the picker; falls back to a static set without a key."""
+    if not _gemini_key_memory:
+        from backend.gemini_client import FALLBACK_GEMINI_MODELS
+        return {"models": list(FALLBACK_GEMINI_MODELS)}
+    return {"models": await list_gemini_models(_gemini_key_memory)}
+
+
 # ── Session ───────────────────────────────────────────────────────────────────
 
 
@@ -202,16 +302,13 @@ class StartSessionBody(BaseModel):
 
 @app.post("/api/session/start")
 async def start_session(body: StartSessionBody, request: Request):
-    global active_session, audio_capture
+    global active_session, audio_capture, active_backend
 
     if active_session and active_session.status == "recording":
         raise HTTPException(
             status_code=409,
             detail={"error": "A recording session is already active", "session_id": active_session.id},
         )
-
-    if not transcriber or not transcriber.model_loaded:
-        raise HTTPException(status_code=503, detail="Whisper model not yet loaded")
 
     session = RecordingSession(
         id=str(uuid.uuid4()),
@@ -220,15 +317,38 @@ async def start_session(body: StartSessionBody, request: Request):
     )
     active_session = session
 
-    def _chunk_cb(chunk, mic_rms, lb_rms):
-        transcriber.enqueue(chunk, mic_rms, lb_rms)
+    from backend.transcription_backend import LocalBackend
+    from backend.deepgram_backend import DeepgramBackend
+
+    if prefs.transcription_engine == "cloud":
+        if not _deepgram_key_memory:
+            active_session = None
+            raise HTTPException(status_code=400, detail="Cloud engine selected but no Deepgram key set")
+        active_backend = DeepgramBackend(
+            api_key=_deepgram_key_memory,
+            session_id=session.id,
+            emit=_on_transcript_segment,
+            on_error=lambda msg: event_loop and event_loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(_broadcast(
+                    {"type": "error", "code": "cloud_transcription",
+                     "message": msg, "recoverable": True}))),
+            started_at=session.started_at,
+        )
+    else:
+        if not transcriber or not transcriber.model_loaded:
+            active_session = None
+            raise HTTPException(status_code=503, detail="Whisper model not yet loaded")
+        active_backend = LocalBackend(transcriber)
+
+    def _chunk_cb(source, frame, rms):
+        active_backend.feed(source, frame, rms)
 
     audio_capture = AudioCapture(
         chunk_callback=_chunk_cb,
         mic_device_index=body.mic_device_index or prefs.mic_device_index,
         loopback_device_index=body.loopback_device_index or prefs.loopback_device_index,
     )
-    transcriber.start(session.id, session.started_at)
+    active_backend.start(session.id, session.started_at)
     audio_capture.start()
 
     # Start audio level broadcast task
@@ -262,7 +382,7 @@ async def _audio_level_task(started_at: datetime) -> None:
 
 
 async def _do_stop_session() -> dict:
-    global active_session, audio_capture
+    global active_session, audio_capture, active_backend
 
     if not active_session or active_session.status != "recording":
         raise HTTPException(status_code=404, detail="No active recording session")
@@ -274,8 +394,8 @@ async def _do_stop_session() -> dict:
     if audio_capture:
         audio_capture.stop()
         audio_capture = None
-    if transcriber:
-        transcriber.stop()
+    if active_backend:
+        active_backend.stop()
 
     save_path_val: str | None = None
     if prefs.auto_save:

@@ -2,7 +2,7 @@
 
 Real-time meeting transcription and AI assistant for Windows. Captures system audio (WASAPI loopback) **and** your microphone, transcribes locally with faster-whisper, labels speakers, and answers questions about the live conversation using Claude — all without audio ever leaving the machine.
 
-> **Platform:** Windows 10/11 64-bit only. **Privacy:** transcription is fully local; the only outbound calls are to the Claude API for Q&A.
+> **Platform:** Windows 10/11 64-bit only. **Privacy:** transcription is fully local; the only outbound calls are to the **Claude API** for Q&A — and, **if you enable auto-answer mode with the Gemini provider, to the Google Gemini API**. Transcript text is sent to whichever provider you choose.
 
 ## Stack
 
@@ -12,7 +12,7 @@ Real-time meeting transcription and AI assistant for Windows. Captures system au
 | UI | React 18 + TypeScript 5 + TailwindCSS + Zustand |
 | Backend sidecar | Python 3.11+ + FastAPI (localhost WebSocket/REST) |
 | Transcription | faster-whisper (local, `base.en` default, GPU→CPU int8 fallback) |
-| Audio capture | PyAudioWPatch (WASAPI loopback + mic, mixed to 16kHz mono) |
+| Audio capture | PyAudioWPatch (WASAPI loopback + mic, two independent 16kHz streams) |
 | Voice activity | Silero VAD |
 | AI Q&A | Anthropic SDK — `claude-sonnet-4-6` default, SSE streaming |
 | Secrets | Windows Credential Manager via keytar |
@@ -89,12 +89,13 @@ npm run make               # Package with Electron Forge (Squirrel installer)
 ## Privacy & security
 
 - **Audio never leaves the machine** — transcription is local via faster-whisper.
-- **API key** is stored only in Windows Credential Manager (keytar). Never written to disk, logs, or frontend state.
+- **API keys** (Claude and, optionally, Gemini) are stored only in Windows Credential Manager (keytar). Never written to disk, logs, or frontend state.
+- **Outbound text:** Q&A and auto-answer send transcript text to the selected LLM provider (Claude by default; Google Gemini if you select it). Nothing else leaves the machine.
 - `.env*`, `*.key`, `preferences.json`, model weights, and logs are git-ignored. Do not commit secrets.
 
 ## Key constraints
 
-- Audio: WASAPI loopback (system) + default mic, mixed at 16kHz mono.
+- Audio: WASAPI loopback (system) + default mic, captured as two independent 16kHz streams (not mixed).
 - Claude context: recent transcript segments up to ~80K tokens per request.
 - Transcript storage: `Documents/MeetingPal/recordings/YYYY-MM-DD_HH-MM/`.
 
@@ -102,4 +103,8 @@ npm run make               # Package with Electron Forge (Squirrel installer)
 
 Core app implemented (capture, transcription, VAD, diarization, Claude streaming Q&A, onboarding, settings, transcript save/export).
 
-Transcription uses a caption-style **utterance assembler** (`backend/utterance.py`): contiguous 0.5s audio frames are VAD-gated and accumulated into a growing buffer; live partial lines stream as someone speaks (rendered grey/italic) and settle into one clean, whole-statement final on a speech pause, sentence punctuation, or a 15s cap. Partials and their final share an id, upserted in both the renderer and the persisted session. See the design spec at `docs/superpowers/specs/2026-06-13-utterance-assembler-design.md` and plan at `docs/superpowers/plans/2026-06-13-utterance-assembler.md`.
+Transcription uses a caption-style **utterance assembler** (`backend/utterance.py`): contiguous 0.5s audio frames are VAD-gated and accumulated into a growing buffer; live partial lines stream as someone speaks (rendered grey/italic) and settle into one clean line **per speaking turn**. A whole multi-sentence message stays on one line (not split on punctuation). The microphone and system (loopback) audio are transcribed as **two independent full-level streams** with a shared VAD, so your voice isn't attenuated by mixing and `You`/`Them` labels are exact (source-based). See `docs/superpowers/specs/2026-06-13-utterance-assembler-design.md` and `docs/superpowers/specs/2026-06-16-dual-stream-transcription-design.md`.
+
+**Auto-answer mode:** when the other party asks a question, MeetingPal can automatically answer it with your chosen LLM (Claude or Gemini, with a model picker) using a custom prompt, streaming the reply as `AI:<response>` — inline in the transcript (Them → AI → Me) and in a Suggested-Answer panel. Configured in Settings, toggled from the TopBar. See `docs/superpowers/specs/2026-06-16-auto-answer-mode-design.md`.
+
+**Overlay/UI:** optional frameless custom title bar, window-opacity slider, collapsible AI sidebar, and a responsive TopBar (icon controls on narrow widths).
