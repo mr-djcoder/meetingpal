@@ -10,8 +10,9 @@ const HEALTH_URL = `http://127.0.0.1:${PORT}/health`;
 // load can exceed the old 15s budget on slower/CPU machines.
 const MAX_HEALTH_RETRIES = 120;
 const HEALTH_POLL_MS = 500;
-const MAX_CRASH_RESTARTS = 3;
+const MAX_CRASH_RESTARTS = 20;
 const CRASH_RESTART_DELAY_MS = 2000;
+const CRASH_RESTART_MAX_DELAY_MS = 15000;
 
 function getSidecarPath(): string {
   if (app.isPackaged) {
@@ -66,17 +67,22 @@ export class SidecarManager {
       return { cmd: getSidecarPath(), args: ['--port', String(PORT)] };
     }
     // Development: run with Python
-    // Try PATH first, fall back to common Windows install locations
+    // On Windows, 'python' may resolve to the Microsoft Store stub which has no
+    // packages installed. Verify uvicorn is importable before accepting a candidate.
+    // Prefer known install paths first so we skip the stub quickly.
     const pythonCandidates = process.platform === 'win32'
       ? [
-          'python',
-          path.join(process.env['LOCALAPPDATA'] ?? '', 'Programs', 'Python', 'Python311', 'python.exe'),
           path.join(process.env['LOCALAPPDATA'] ?? '', 'Programs', 'Python', 'Python312', 'python.exe'),
+          path.join(process.env['LOCALAPPDATA'] ?? '', 'Programs', 'Python', 'Python311', 'python.exe'),
           'python3',
+          'python',
         ]
       : ['python3', 'python'];
     const pythonCmd = pythonCandidates.find((p) => {
-      try { require('child_process').execFileSync(p, ['--version'], { timeout: 2000 }); return true; } catch { return false; }
+      try {
+        require('child_process').execFileSync(p, ['-c', 'import uvicorn'], { timeout: 5000 });
+        return true;
+      } catch { return false; }
     }) ?? 'python';
     return {
       cmd: pythonCmd,
@@ -107,12 +113,14 @@ export class SidecarManager {
     this.process.once('exit', (code) => {
       if (!this.stopping && this.crashCount < MAX_CRASH_RESTARTS) {
         this.crashCount++;
+        // Exponential backoff capped at max delay so rapid crashes don't spin-loop
+        const delay = Math.min(CRASH_RESTART_DELAY_MS * this.crashCount, CRASH_RESTART_MAX_DELAY_MS);
         this.logStream?.write(
-          `[${timestamp()}] CRASH #${this.crashCount} (code=${code}), restarting in ${CRASH_RESTART_DELAY_MS}ms\n`
+          `[${timestamp()}] CRASH #${this.crashCount} (code=${code}), restarting in ${delay}ms\n`
         );
         setTimeout(() => {
           if (!this.stopping) this._spawnProcess();
-        }, CRASH_RESTART_DELAY_MS);
+        }, delay);
       }
     });
   }
