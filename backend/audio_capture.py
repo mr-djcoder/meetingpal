@@ -39,6 +39,8 @@ class AudioCapture:
         self._mic_thread: threading.Thread | None = None
         self._loopback_thread: threading.Thread | None = None
         self._emit_thread: threading.Thread | None = None
+        self._mic_stream = None
+        self._loopback_stream = None
 
         self._lock = threading.Lock()
 
@@ -53,13 +55,26 @@ class AudioCapture:
 
     def stop(self) -> None:
         self._stop_event.set()
+        # Abort open streams so blocking read() calls return immediately.
+        # WASAPI loopback streams can block indefinitely when no audio is playing;
+        # without this, the thread join times out and pa.terminate() is called while
+        # the stream is still active → 0xC0000005 access violation.
+        for stream in (self._mic_stream, self._loopback_stream):
+            if stream is not None:
+                try:
+                    stream.stop_stream()
+                except Exception:
+                    pass
         if self._mic_thread:
-            self._mic_thread.join(timeout=2)
+            self._mic_thread.join(timeout=5)
         if self._loopback_thread:
-            self._loopback_thread.join(timeout=2)
+            self._loopback_thread.join(timeout=5)
         if self._emit_thread:
-            self._emit_thread.join(timeout=2)
-        self._pa.terminate()
+            self._emit_thread.join(timeout=5)
+        try:
+            self._pa.terminate()
+        except Exception:
+            pass
 
     def get_mic_rms(self) -> float:
         buf = list(self._mic_buffer)[-TARGET_RATE * 3 :]
@@ -89,9 +104,13 @@ class AudioCapture:
             input_device_index=idx,
             frames_per_buffer=CHUNK_FRAMES,
         )
+        self._mic_stream = stream
         try:
             while not self._stop_event.is_set():
-                raw = stream.read(CHUNK_FRAMES, exception_on_overflow=False)
+                try:
+                    raw = stream.read(CHUNK_FRAMES, exception_on_overflow=False)
+                except Exception:
+                    break
                 arr = np.frombuffer(raw, dtype=np.float32)
                 if native_rate != TARGET_RATE:
                     n_out = int(len(arr) * TARGET_RATE / native_rate)
@@ -100,8 +119,12 @@ class AudioCapture:
                 with self._lock:
                     self._mic_buffer.extend(arr.tolist())
         finally:
-            stream.stop_stream()
-            stream.close()
+            self._mic_stream = None
+            try:
+                stream.stop_stream()
+                stream.close()
+            except Exception:
+                pass
 
     def _capture_loopback(self) -> None:
         loopback_info = self._get_default_loopback_info()
@@ -115,9 +138,13 @@ class AudioCapture:
             input_device_index=idx,
             frames_per_buffer=CHUNK_FRAMES,
         )
+        self._loopback_stream = stream
         try:
             while not self._stop_event.is_set():
-                raw = stream.read(CHUNK_FRAMES, exception_on_overflow=False)
+                try:
+                    raw = stream.read(CHUNK_FRAMES, exception_on_overflow=False)
+                except Exception:
+                    break
                 arr = np.frombuffer(raw, dtype=np.float32)
                 # Convert stereo → mono
                 if loopback_info.get("maxInputChannels", 2) == 2:
@@ -130,8 +157,12 @@ class AudioCapture:
                 with self._lock:
                     self._loopback_buffer.extend(arr.tolist())
         finally:
-            stream.stop_stream()
-            stream.close()
+            self._loopback_stream = None
+            try:
+                stream.stop_stream()
+                stream.close()
+            except Exception:
+                pass
 
     def _emit_chunks(self) -> None:
         """Drain contiguous 0.5s frames from each source independently (no mixing)."""
