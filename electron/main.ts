@@ -334,6 +334,12 @@ ipcMain.handle('window-maximize', () => {
 });
 ipcMain.handle('window-close', () => mainWindow?.close());
 
+ipcMain.handle('set-window-width', (_e, width: number) => {
+  if (!mainWindow) return;
+  const [, h] = mainWindow.getSize();
+  mainWindow.setSize(Math.max(200, Math.round(Number(width))), h);
+});
+
 ipcMain.handle('set-opacity', (_e, value: number) => {
   const clamped = Math.min(1, Math.max(0.05, Number(value)));
   mainWindow?.setOpacity(clamped);

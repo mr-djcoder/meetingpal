@@ -25,7 +25,10 @@ function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoAnswerOn, setAutoAnswerOn] = useState(false);
   const [chatVisible, setChatVisible] = useState(true);
-  const [transcriptVisible, setTranscriptVisible] = useState(false);
+  const [transcriptVisible, setTranscriptVisible] = useState(true);
+  // Separate from transcriptVisible: only hides the header bar (Transcript + Copy/Export),
+  // not the transcript content.
+  const [transcriptBarVisible, setTranscriptBarVisible] = useState(true);
   const [customTitlebar, setCustomTitlebar] = useState(false);
   const [splitPct, setSplitPct] = useState(60);
   const [opacityPct, setOpacityPct] = useState(100);
@@ -81,7 +84,7 @@ function MainLayout() {
       };
       setAutoAnswerOn(Boolean(aa.auto_answer_enabled));
       setChatVisible(aa.chat_panel_visible ?? true);
-      setTranscriptVisible(Boolean(aa.transcript_visible));
+      setTranscriptVisible(aa.transcript_visible !== false);
       setCustomTitlebar(Boolean(aa.custom_titlebar));
       setSplitPct(aa.transcript_split ?? 60);
       setOpacityPct(Math.round((aa.window_opacity ?? 1) * 100));
@@ -100,12 +103,18 @@ function MainLayout() {
     const next = !chatVisible;
     setChatVisible(next);
     window.electronAPI.setPreferences({ chat_panel_visible: next } as never);
+    // Snap window to a comfortable width whenever the AI panel is toggled.
+    window.electronAPI.setWindowWidth(750);
   };
 
-  const toggleTranscript = () => {
-    const next = !transcriptVisible;
-    setTranscriptVisible(next);
-    window.electronAPI.setPreferences({ transcript_visible: next } as never);
+  const toggleTranscriptBar = () => {
+    setTranscriptBarVisible((v) => !v);
+  };
+
+  const toggleAutoAnswer = () => {
+    const next = !autoAnswerOn;
+    setAutoAnswerOn(next);
+    window.electronAPI.setPreferences({ auto_answer_enabled: next } as never);
   };
 
   const startDividerDrag = (e: React.MouseEvent) => {
@@ -135,8 +144,10 @@ function MainLayout() {
         onSettingsOpen={() => setSettingsOpen(true)}
         chatVisible={chatVisible}
         onToggleChat={toggleChat}
-        transcriptVisible={transcriptVisible}
-        onToggleTranscript={toggleTranscript}
+        transcriptBarVisible={transcriptBarVisible}
+        onToggleTranscriptBar={toggleTranscriptBar}
+        autoAnswerOn={autoAnswerOn}
+        onToggleAutoAnswer={toggleAutoAnswer}
         customTitlebar={customTitlebar}
       />
 
@@ -186,7 +197,7 @@ function MainLayout() {
             className="h-full overflow-hidden"
             style={{ width: chatVisible ? `${splitPct}%` : '100%' }}
           >
-            <TranscriptPanel />
+            <TranscriptPanel headerVisible={transcriptBarVisible} />
           </div>
         )}
         {transcriptVisible && chatVisible && (
@@ -233,12 +244,21 @@ export default function App() {
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
 
   useEffect(() => {
+    // hasApiKey() reads from Windows Credential Manager (always available).
+    // getPreferences() requires the sidecar; if it's still starting up or
+    // crashed, don't show the onboarding wizard — just trust the API key.
     Promise.all([
       window.electronAPI.hasApiKey(),
-      window.electronAPI.getPreferences(),
+      window.electronAPI.getPreferences().catch(() => null),
     ]).then(([hasKey, prefs]) => {
-      const p = prefs as { onboarding_completed: boolean };
-      setOnboardingDone(hasKey && p.onboarding_completed);
+      if (prefs === null) {
+        // Sidecar not yet ready — if the key exists, assume onboarding is done
+        // so the main layout mounts and retries preferences on its own.
+        setOnboardingDone(Boolean(hasKey));
+      } else {
+        const p = prefs as { onboarding_completed: boolean };
+        setOnboardingDone(Boolean(hasKey) && p.onboarding_completed);
+      }
     }).catch(() => setOnboardingDone(false));
   }, []);
 

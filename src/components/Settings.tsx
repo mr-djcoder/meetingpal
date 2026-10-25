@@ -292,22 +292,8 @@ export function Settings({ isOpen, onClose }: Props) {
 
           {/* Auto-Answer */}
           <Section title="Auto-Answer (suggested replies)">
+            <p className="text-xs text-gray-400 mb-3">Toggle auto-answer with the ⚡ button in the top bar.</p>
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-300">Enable auto-answer</span>
-                <button
-                  onClick={() => update({ auto_answer_enabled: !merged.auto_answer_enabled })}
-                  className={`relative inline-flex h-5 w-9 rounded-full transition-colors ${
-                    merged.auto_answer_enabled ? 'bg-blue-600' : 'bg-gray-600'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                      merged.auto_answer_enabled ? 'translate-x-4' : 'translate-x-0.5'
-                    }`}
-                  />
-                </button>
-              </div>
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Prompt</label>
                 <textarea

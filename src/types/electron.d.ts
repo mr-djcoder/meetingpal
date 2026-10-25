@@ -105,6 +105,7 @@ interface ElectronAPI {
   windowMaximize(): Promise<void>;
   windowClose(): Promise<void>;
   applyTitlebar(custom: boolean): Promise<void>;
+  setWindowWidth(width: number): Promise<void>;
   setOpacity(value: number): Promise<number>;
   setAlwaysOnTop(value: boolean): Promise<boolean>;
   copyTranscript(sessionId: string): Promise<void>;

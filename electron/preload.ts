@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),
   windowClose: () => ipcRenderer.invoke('window-close'),
   applyTitlebar: (custom: boolean) => ipcRenderer.invoke('apply-titlebar', custom),
+  setWindowWidth: (width: number) => ipcRenderer.invoke('set-window-width', width),
   setOpacity: (value: number) => ipcRenderer.invoke('set-opacity', value),
   setAlwaysOnTop: (value: boolean) => ipcRenderer.invoke('set-always-on-top', value),
 

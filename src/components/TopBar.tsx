@@ -5,8 +5,10 @@ interface Props {
   onSettingsOpen: () => void;
   chatVisible: boolean;
   onToggleChat: () => void;
-  transcriptVisible: boolean;
-  onToggleTranscript: () => void;
+  transcriptBarVisible: boolean;
+  onToggleTranscriptBar: () => void;
+  autoAnswerOn: boolean;
+  onToggleAutoAnswer: () => void;
   customTitlebar: boolean;
 }
 
@@ -20,12 +22,13 @@ export function TopBar({
   onSettingsOpen,
   chatVisible,
   onToggleChat,
-  transcriptVisible,
-  onToggleTranscript,
+  transcriptBarVisible,
+  onToggleTranscriptBar,
+  autoAnswerOn,
+  onToggleAutoAnswer,
   customTitlebar,
 }: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
-  const [autoAnswer, setAutoAnswer] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [recError, setRecError] = useState<string | null>(null);
@@ -53,8 +56,7 @@ export function TopBar({
     window.electronAPI
       .getPreferences()
       .then((p) => {
-        const prefs = p as unknown as { auto_answer_enabled?: boolean; always_on_top?: boolean };
-        setAutoAnswer(Boolean(prefs.auto_answer_enabled));
+        const prefs = p as unknown as { always_on_top?: boolean };
         const top = Boolean(prefs.always_on_top);
         setPinned(top);
         window.electronAPI.setAlwaysOnTop(top); // restore OS window state
@@ -69,12 +71,6 @@ export function TopBar({
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-
-  const toggleAutoAnswer = async () => {
-    const next = !autoAnswer;
-    setAutoAnswer(next);
-    await window.electronAPI.setPreferences({ auto_answer_enabled: next } as never);
-  };
 
   const togglePin = async () => {
     const next = !pinned;
@@ -175,12 +171,12 @@ export function TopBar({
 
         {/* Auto-answer toggle */}
         <button
-          onClick={toggleAutoAnswer}
-          title={autoAnswer ? 'Auto-answer ON' : 'Auto-answer OFF'}
+          onClick={onToggleAutoAnswer}
+          title={autoAnswerOn ? 'Auto-answer ON' : 'Auto-answer OFF'}
           className={
             narrow
-              ? `p-1.5 rounded transition-colors ${autoAnswer ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
-              : `text-xs px-2 py-1 rounded font-medium transition-colors ${autoAnswer ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              ? `p-1.5 rounded transition-colors ${autoAnswerOn ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              : `text-xs px-2 py-1 rounded font-medium transition-colors ${autoAnswerOn ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
           }
         >
           {narrow ? (
@@ -192,14 +188,14 @@ export function TopBar({
           )}
         </button>
 
-        {/* Toggle transcript */}
+        {/* Toggle transcript header bar (Transcript label + Copy/Export) */}
         <button
-          onClick={onToggleTranscript}
-          title={transcriptVisible ? 'Hide transcript' : 'Show transcript'}
+          onClick={onToggleTranscriptBar}
+          title={transcriptBarVisible ? 'Hide transcript bar' : 'Show transcript bar'}
           className={
             narrow
-              ? `p-1.5 rounded transition-colors ${transcriptVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
-              : `text-xs px-2 py-1 rounded font-medium transition-colors ${transcriptVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              ? `p-1.5 rounded transition-colors ${transcriptBarVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              : `text-xs px-2 py-1 rounded font-medium transition-colors ${transcriptBarVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
           }
         >
           {narrow ? (
