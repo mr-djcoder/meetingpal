@@ -180,3 +180,31 @@ def test_ask_error_does_not_poison_history(client, fake_workers, monkeypatch):
 
 def test_ask_requires_known_session(client, fake_workers):
     assert _ask(client, "nope").status_code == 404
+
+
+def test_ask_uses_gemini_when_selected(client, fake_workers, monkeypatch):
+    seen = {}
+
+    async def fake_gemini(**kwargs):
+        seen.update(kwargs)
+        yield {"type": "content_delta", "text": "From Gemini."}
+        yield {"type": "message_stop"}
+
+    monkeypatch.setattr(main._gemini_client, "ask", fake_gemini)
+    monkeypatch.setattr(main, "_gemini_key_memory", "g-key")
+    monkeypatch.setattr(main.prefs, "chat_provider", "gemini")
+    monkeypatch.setattr(main.prefs, "chat_gemini_model", "gemini-test")
+    sid = client.post("/api/session/start", json={}).json()["session_id"]
+    r = client.post("/api/ask", json={"question": "hi", "session_id": sid})  # no Claude key sent
+    assert r.status_code == 200
+    assert seen["api_key"] == "g-key" and seen["model"] == "gemini-test"
+    assert main.active_session.chat_messages[-1].content == "From Gemini."
+    client.post("/api/session/stop")
+
+
+def test_ask_gemini_without_key_is_401(client, fake_workers, monkeypatch):
+    monkeypatch.setattr(main, "_gemini_key_memory", None)
+    monkeypatch.setattr(main.prefs, "chat_provider", "gemini")
+    sid = client.post("/api/session/start", json={}).json()["session_id"]
+    assert client.post("/api/ask", json={"question": "hi", "session_id": sid}).status_code == 401
+    client.post("/api/session/stop")

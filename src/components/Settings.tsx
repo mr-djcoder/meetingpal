@@ -21,6 +21,8 @@ interface UserPreferences {
   onboarding_completed: boolean;
   auto_answer_enabled: boolean;
   auto_answer_prompt: string;
+  chat_provider: 'claude' | 'gemini';
+  chat_gemini_model: string;
   auto_answer_provider: string;
   auto_answer_model: string;
   custom_titlebar: boolean;
@@ -298,16 +300,49 @@ export function Settings({ isOpen, onClose }: Props) {
             </div>
           </Section>
 
-          {/* Claude Model */}
+          {/* Chat provider and model */}
           <Section title="AI Model">
-            <RadioGroup
-              value={merged.claude_model}
-              onChange={(v) => update({ claude_model: v })}
-              options={[
-                { value: 'claude-sonnet-4-6', label: 'Claude Sonnet (fast, recommended)' },
-                { value: 'claude-opus-4-6', label: 'Claude Opus (most capable, slower)' },
-              ]}
-            />
+            <div className="mb-3">
+              <label className="text-xs text-gray-400 mb-1 block">Chat provider</label>
+              <select
+                value={merged.chat_provider}
+                onChange={(e) => {
+                  const p = e.target.value as 'claude' | 'gemini';
+                  update({
+                    chat_provider: p,
+                    ...(p === 'gemini' && !geminiModels.includes(merged.chat_gemini_model)
+                      ? { chat_gemini_model: geminiModels[0] ?? 'gemini-3.5-flash' }
+                      : {}),
+                  });
+                }}
+                className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+              >
+                <option value="claude">Claude (Anthropic)</option>
+                <option value="gemini">Gemini (Google, free tier available)</option>
+              </select>
+            </div>
+            {merged.chat_provider === 'gemini' ? (
+              <select
+                value={merged.chat_gemini_model}
+                onChange={(e) => update({ chat_gemini_model: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+              >
+                {(geminiModels.length ? geminiModels : [merged.chat_gemini_model]).map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <RadioGroup
+                value={merged.claude_model}
+                onChange={(v) => update({ claude_model: v })}
+                options={[
+                  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet (fast, recommended)' },
+                  { value: 'claude-opus-4-6', label: 'Claude Opus (most capable, slower)' },
+                ]}
+              />
+            )}
           </Section>
 
           {/* Auto-Answer */}

@@ -41,6 +41,8 @@ interface UserPreferences {
   onboarding_completed: boolean;
   auto_answer_enabled: boolean;
   auto_answer_prompt: string;
+  chat_provider: 'claude' | 'gemini';
+  chat_gemini_model: string;
   auto_answer_provider: string;
   auto_answer_model: string;
   chat_panel_visible: boolean;

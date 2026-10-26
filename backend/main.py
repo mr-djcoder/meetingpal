@@ -257,6 +257,8 @@ NULLABLE_PREFS = {"mic_device_index", "loopback_device_index"}  # None = "system
 class PrefsUpdate(BaseModel):
     whisper_model: Literal["base.en", "small.en", "medium.en"] | None = None
     claude_model: str | None = Field(default=None, min_length=1, max_length=100)
+    chat_provider: Literal["claude", "gemini"] | None = None
+    chat_gemini_model: str | None = Field(default=None, min_length=1, max_length=100)
     mic_device_index: int | None = Field(default=None, ge=0)
     loopback_device_index: int | None = Field(default=None, ge=0)
     auto_save: bool | None = None
@@ -594,8 +596,14 @@ class AskBody(BaseModel):
 
 
 @app.post("/api/ask")
-async def ask_claude(body: AskBody, request: Request):
-    api_key = _require_api_key(request)
+async def ask_ai(body: AskBody, request: Request):
+    provider = prefs.chat_provider
+    if provider == "gemini":
+        if not _gemini_key_memory:
+            raise HTTPException(status_code=401, detail="Missing Gemini API key")
+        api_key, client, model = _gemini_key_memory, _gemini_client, prefs.chat_gemini_model
+    else:
+        api_key, client, model = _require_api_key(request), _claude_client, body.claude_model
 
     if not active_session or active_session.id != body.session_id:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -616,12 +624,12 @@ async def ask_claude(body: AskBody, request: Request):
         full_response = ""
         failed = False
         try:
-            async for event in _claude_client.ask(
+            async for event in client.ask(
                 question=body.question,
                 segments=segments,
                 history=history,
                 api_key=api_key,
-                model=body.claude_model,
+                model=model,
             ):
                 if event["type"] == "content_delta":
                     full_response += event["text"]
