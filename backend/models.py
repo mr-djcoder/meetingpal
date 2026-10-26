@@ -3,8 +3,14 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
+
+
+def to_utc_iso(dt: datetime) -> str:
+    """ISO-8601 UTC string. Naive datetimes are local time (datetime.now()), so convert
+    through astimezone() instead of just appending "Z" (which mislabels local as UTC)."""
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 @dataclass
@@ -25,7 +31,7 @@ class TranscriptSegment:
             "id": self.id,
             "session_id": self.session_id,
             "speaker": self.speaker,
-            "wall_clock_time": self.wall_clock_time.isoformat() + "Z",
+            "wall_clock_time": to_utc_iso(self.wall_clock_time),
             "session_offset_seconds": self.session_offset_seconds,
             "text": self.text,
             "is_final": self.is_final,
@@ -50,6 +56,7 @@ class RecordingSession:
     stopped_at: datetime | None = None
     status: Literal["recording", "stopped"] = "recording"
     save_path: str | None = None
+    folder: str | None = None  # session output folder (journal + transcript.md)
     segments: list[TranscriptSegment] = field(default_factory=list)
     chat_messages: list[ChatMessage] = field(default_factory=list)
 

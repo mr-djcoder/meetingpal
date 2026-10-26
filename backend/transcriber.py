@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from datetime import datetime
 from typing import Callable
 
@@ -15,6 +16,14 @@ from backend.streaming_utterance import StreamingUtteranceAssembler
 from backend.vad import SileroVAD
 
 DownloadProgressCallback = Callable[[float], None]
+ErrorCallback = Callable[[str], None]
+
+# Frames waiting for the single worker. Two sources re-decode on one thread, so a slow
+# model builds a backlog; beyond this the oldest frames are dropped (bounded latency)
+# instead of letting the lag grow without limit.
+MAX_BACKLOG_FRAMES = 40  # ~20s of audio across both sources
+ERROR_REPORT_INTERVAL_S = 30.0
+STOP_JOIN_TIMEOUT_S = 30.0
 
 
 def _cuda_available() -> bool:
@@ -33,10 +42,15 @@ class WhisperTranscriber:
         emit_callback: Callable[[TranscriptSegment], None] | None = None,
         download_progress_cb: DownloadProgressCallback | None = None,
         transcribe_mode: str = "streaming",
+        error_callback: ErrorCallback | None = None,
     ) -> None:
         self._model_name = model_name
         self._emit_callback = emit_callback
         self._download_progress_cb = download_progress_cb
+        self._error_callback = error_callback
+        self._last_error_at = float("-inf")
+        self._dropped_frames = 0
+        self._load_lock = threading.Lock()  # one model (re)load at a time
         self._model: WhisperModel | None = None
         self._model_loaded = False
         self._queue: queue.Queue[tuple | None] = queue.Queue()
@@ -84,6 +98,10 @@ class WhisperTranscriber:
 
     def load_model(self, name: str | None = None) -> None:
         """Load (or reload) the Whisper model. Blocks until ready."""
+        with self._load_lock:
+            self._load_model_locked(name)
+
+    def _load_model_locked(self, name: str | None) -> None:
         if name:
             self._model_name = name
         self._model_loaded = False
@@ -134,13 +152,26 @@ class WhisperTranscriber:
                 initial_prompt=initial_prompt or None,
             )
             return " ".join(s.text.strip() for s in segments).strip()
-        except Exception:
+        except Exception as exc:
+            # Don't let a decode failure (e.g. GPU out of memory) look like silence.
+            self._report_error(f"Transcription failed: {exc}")
             return ""
+
+    def _report_error(self, message: str) -> None:
+        now = time.monotonic()
+        if self._error_callback is None or now - self._last_error_at < ERROR_REPORT_INTERVAL_S:
+            return
+        self._last_error_at = now
+        try:
+            self._error_callback(message)
+        except Exception:
+            pass
 
     def start(self, session_id: str, session_started_at: datetime) -> None:
         """Start the worker thread for a new session."""
         self._session_id = session_id
         self._session_started_at = session_started_at
+        self._dropped_frames = 0
         # Drop any frames left over from a previous session so the new one never
         # transcribes stale audio "after the fact" on stop/restart.
         self._drain_queue()
@@ -158,10 +189,14 @@ class WhisperTranscriber:
         self._stop_event.set()
         self._queue.put(None)  # sentinel
         if self._worker:
-            self._worker.join(timeout=10)
+            self._worker.join(timeout=STOP_JOIN_TIMEOUT_S)
         self._drain_queue()
         # Flush AFTER the worker has exited so the Whisper model is only ever accessed
-        # by one thread at a time (WhisperModel is not thread-safe).
+        # by one thread at a time (WhisperModel is not thread-safe). If the worker is
+        # still busy past the timeout, skip the flush rather than decode concurrently.
+        if self._worker and self._worker.is_alive():
+            self._report_error("Transcription worker was still busy at stop; final words may be missing.")
+            return
         if self._mic_assembler:
             self._mic_assembler.flush()
         if self._lb_assembler:
@@ -183,6 +218,16 @@ class WhisperTranscriber:
         if self._session_started_at:
             offset = (now - self._session_started_at).total_seconds()
         self._queue.put((source, frame, rms, self._session_id, now, offset))
+        while self._queue.qsize() > MAX_BACKLOG_FRAMES:
+            try:
+                self._queue.get_nowait()  # shed the oldest frame
+                self._queue.task_done()
+            except queue.Empty:
+                break
+            self._dropped_frames += 1
+            if self._dropped_frames == 1 or self._dropped_frames % 40 == 0:
+                self._report_error("Transcription is falling behind; dropping audio. "
+                                   "Try a smaller model or the cloud engine.")
 
     def _worker_loop(self) -> None:
         while not self._stop_event.is_set():

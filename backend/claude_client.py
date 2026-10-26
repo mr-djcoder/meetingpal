@@ -1,7 +1,7 @@
 """Anthropic Claude client — streaming SSE responses grounded in meeting transcript."""
 from __future__ import annotations
 
-import asyncio
+import math
 from typing import AsyncGenerator
 
 import anthropic
@@ -20,6 +20,46 @@ SYSTEM_PERSONA = (
 
 MAX_TRANSCRIPT_TOKENS = 60_000
 MAX_HISTORY_TOKENS = 20_000
+TRIM_PASSES = 4  # bounded count_tokens round trips when over budget
+
+# Transcript is sent as fixed-size blocks so the older, full blocks form a stable prefix
+# that prompt caching can reuse across asks (only the newest partial block changes).
+SEGMENTS_PER_BLOCK = 40
+TRANSCRIPT_HEADER = "## Meeting Transcript\n\n"
+
+
+def format_segment(seg: TranscriptSegment) -> str:
+    ts = seg.wall_clock_time.strftime("%I:%M %p").lstrip("0")
+    return f'[{ts}] {seg.speaker}: "{seg.text}"'
+
+
+def build_system_blocks(persona: str, segments: list[TranscriptSegment]) -> list[dict]:
+    """System prompt as content blocks: persona, then the transcript in fixed chunks.
+
+    The last *full* chunk carries the cache breakpoint; later (partial) chunk is uncached.
+    """
+    blocks: list[dict] = [{"type": "text", "text": persona}]
+    if not segments:
+        blocks.append({"type": "text", "text": TRANSCRIPT_HEADER + "(no speech transcribed yet)"})
+        return blocks
+
+    last_full = -1
+    chunks: list[list[TranscriptSegment]] = []
+    for i in range(0, len(segments), SEGMENTS_PER_BLOCK):
+        chunk = segments[i : i + SEGMENTS_PER_BLOCK]
+        chunks.append(chunk)
+        if len(chunk) == SEGMENTS_PER_BLOCK:
+            last_full = len(chunks) - 1
+
+    for idx, chunk in enumerate(chunks):
+        text = "\n".join(format_segment(s) for s in chunk)
+        if idx == 0:
+            text = TRANSCRIPT_HEADER + text
+        block: dict = {"type": "text", "text": text}
+        if idx == last_full:
+            block["cache_control"] = {"type": "ephemeral"}
+        blocks.append(block)
+    return blocks
 
 
 class ClaudeClient:
@@ -40,22 +80,17 @@ class ClaudeClient:
         client = anthropic.AsyncAnthropic(api_key=api_key)
 
         persona = system_prompt or SYSTEM_PERSONA
-        transcript_text = self._format_transcript(segments)
-        system_prompt = f"{persona}\n\n## Meeting Transcript\n\n{transcript_text}"
-
-        # Trim transcript to token budget
-        system_prompt = await self._trim_to_tokens(
-            client, system_prompt, MAX_TRANSCRIPT_TOKENS, segments
-        )
+        kept = await self._fit_segments(client, model, persona, segments, MAX_TRANSCRIPT_TOKENS)
+        system = build_system_blocks(persona, kept)
 
         messages = self._build_messages(history, question)
-        messages = await self._trim_history(client, messages, MAX_HISTORY_TOKENS)
+        messages = await self._trim_history(client, model, messages, MAX_HISTORY_TOKENS)
 
         try:
             async with client.messages.stream(
                 model=model,
                 max_tokens=2048,
-                system=system_prompt,
+                system=system,
                 messages=messages,
             ) as stream:
                 async for text in stream.text_stream:
@@ -77,87 +112,61 @@ class ClaudeClient:
             yield {"type": "error", "message": str(exc)}
 
     def _format_transcript(self, segments: list[TranscriptSegment]) -> str:
-        lines = []
-        for seg in segments:
-            ts = seg.wall_clock_time.strftime("%I:%M %p").lstrip("0")
-            lines.append(f'[{ts}] {seg.speaker}: "{seg.text}"')
-        return "\n".join(lines)
+        return "\n".join(format_segment(s) for s in segments)
 
     def _build_messages(self, history: list[ChatMessage], question: str) -> list[dict]:
-        messages = []
-        for msg in history:
-            messages.append({"role": msg.role, "content": msg.content})
+        # The API rejects empty text content, so never replay an empty turn.
+        messages = [
+            {"role": m.role, "content": m.content} for m in history if m.content.strip()
+        ]
         messages.append({"role": "user", "content": question})
         return messages
 
-    async def _trim_to_tokens(
+    async def _count(self, client: anthropic.AsyncAnthropic, model: str, system, messages) -> int | None:
+        try:
+            resp = await client.messages.count_tokens(model=model, system=system, messages=messages)
+            return resp.input_tokens
+        except Exception:
+            return None  # counting is best-effort; never block the answer on it
+
+    async def _fit_segments(
         self,
         client: anthropic.AsyncAnthropic,
-        system_prompt: str,
-        max_tokens: int,
+        model: str,
+        persona: str,
         segments: list[TranscriptSegment],
-    ) -> str:
-        try:
-            resp = await client.messages.count_tokens(
-                model="claude-sonnet-4-6",
-                system=system_prompt,
-                messages=[{"role": "user", "content": "hi"}],
-            )
-            token_count = resp.input_tokens
-        except Exception:
-            return system_prompt
+        budget: int,
+    ) -> list[TranscriptSegment]:
+        """Drop the oldest segments until the prompt fits, in a bounded number of passes.
 
-        if token_count <= max_tokens:
-            return system_prompt
-
-        # Drop oldest segments until within budget
-        working_segments = list(segments)
-        while token_count > max_tokens and len(working_segments) > 1:
-            working_segments = working_segments[1:]
-            transcript_text = self._format_transcript(working_segments)
-            new_prompt = f"{SYSTEM_PERSONA}\n\n## Meeting Transcript\n\n{transcript_text}"
-            try:
-                resp = await client.messages.count_tokens(
-                    model="claude-sonnet-4-6",
-                    system=new_prompt,
-                    messages=[{"role": "user", "content": "hi"}],
-                )
-                token_count = resp.input_tokens
-                system_prompt = new_prompt
-            except Exception:
-                break
-
-        return system_prompt
+        Each pass sizes the cut from the measured overshoot instead of dropping one
+        segment per API round trip.
+        """
+        kept = list(segments)
+        probe = [{"role": "user", "content": "hi"}]
+        for _ in range(TRIM_PASSES):
+            count = await self._count(client, model, build_system_blocks(persona, kept), probe)
+            if count is None or count <= budget or len(kept) <= 1:
+                return kept
+            keep_n = max(1, int(len(kept) * (budget / count) * 0.9))
+            kept = kept[-keep_n:]
+        return kept
 
     async def _trim_history(
         self,
         client: anthropic.AsyncAnthropic,
+        model: str,
         messages: list[dict],
         max_tokens: int,
     ) -> list[dict]:
         if len(messages) <= 1:
             return messages
-        try:
-            resp = await client.messages.count_tokens(
-                model="claude-sonnet-4-6",
-                system="",
-                messages=messages,
-            )
-            token_count = resp.input_tokens
-        except Exception:
-            return messages
-
-        # Drop oldest exchange pairs (skip the last user message)
-        while token_count > max_tokens and len(messages) > 3:
-            messages = messages[2:]  # drop one user+assistant pair
-            try:
-                resp = await client.messages.count_tokens(
-                    model="claude-sonnet-4-6",
-                    system="",
-                    messages=messages,
-                )
-                token_count = resp.input_tokens
-            except Exception:
+        for _ in range(TRIM_PASSES):
+            count = await self._count(client, model, "", messages)
+            if count is None or count <= max_tokens or len(messages) <= 2:
                 break
-
+            drop = max(1, math.ceil(len(messages) * (1 - max_tokens / count)))
+            messages = messages[drop:]
+            while len(messages) > 1 and messages[0]["role"] != "user":
+                messages = messages[1:]  # a conversation must open with a user turn
         return messages

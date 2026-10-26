@@ -48,6 +48,7 @@ class UserPreferences:
     local_transcribe_mode: Literal["streaming", "legacy"] = "streaming"
     transcript_split: float = 60.0  # % width of the transcript panel
     transcript_visible: bool = False
+    suppress_echo: bool = True  # drop mic text that duplicates the other side (speakers, no headset)
 
 
 def load_preferences() -> UserPreferences:
@@ -81,17 +82,49 @@ def save_preferences(prefs: UserPreferences) -> None:
         raise
 
 
+JOURNAL_NAME = "segments.jsonl"
+
+
+def allocate_session_folder(session: "RecordingSession", prefs: UserPreferences) -> Path:
+    """Create (once) and return this session's output folder.
+
+    Named to the second, with a numeric suffix on collision, so two sessions started
+    close together never overwrite each other. The path is cached on the session.
+    """
+    if session.folder:
+        return Path(session.folder)
+    base = Path(prefs.save_path) / session.started_at.strftime("%Y-%m-%d_%H-%M-%S")
+    folder = base
+    n = 2
+    while folder.exists():
+        folder = base.with_name(f"{base.name}_{n}")
+        n += 1
+    folder.mkdir(parents=True, exist_ok=True)
+    session.folder = str(folder)
+    return folder
+
+
+def journal_segment(session: "RecordingSession", prefs: UserPreferences, seg: "TranscriptSegment") -> None:
+    """Append one finalized segment to the session journal (survives a sidecar crash)."""
+    folder = allocate_session_folder(session, prefs)
+    record = {
+        "id": seg.id,
+        "speaker": seg.speaker,
+        "time": seg.wall_clock_time.isoformat(),
+        "offset": seg.session_offset_seconds,
+        "text": seg.text,
+    }
+    with open(folder / JOURNAL_NAME, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 def save_session(session: "RecordingSession", prefs: UserPreferences) -> str:
-    """Write transcript.md and qa_log.md to a dated session folder.
+    """Write transcript.md and qa_log.md to the session folder.
 
     Returns the absolute path to the created folder.
     """
-    from backend.models import ChatMessage, TranscriptSegment  # avoid circular
-
     started = session.started_at
-    folder_name = started.strftime("%Y-%m-%d_%H-%M")
-    folder = Path(prefs.save_path) / folder_name
-    folder.mkdir(parents=True, exist_ok=True)
+    folder = allocate_session_folder(session, prefs)
 
     # transcript.md
     duration_str = _format_duration(session)
