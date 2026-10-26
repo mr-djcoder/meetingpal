@@ -51,6 +51,7 @@ class UserPreferences:
     local_transcribe_mode: Literal["streaming", "legacy"] = "streaming"
     transcript_split: float = 60.0  # % width of the transcript panel
     transcript_visible: bool = False
+    suggested_answer_visible: bool = True  # show the Suggested Answer box
     suppress_echo: bool = True  # drop mic text that duplicates the other side (speakers, no headset)
 
 

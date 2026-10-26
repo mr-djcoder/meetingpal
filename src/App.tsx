@@ -6,6 +6,7 @@ import { SuggestedAnswerPanel } from './components/SuggestedAnswerPanel';
 import { TopBar } from './components/TopBar';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { useWebSocket } from './hooks/useWebSocket';
+import { useAutoAnswerStore } from './store/autoAnswerStore';
 import { OnboardingWizard } from './onboarding/OnboardingWizard';
 
 interface SidecarError {
@@ -20,6 +21,7 @@ function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoAnswerOn, setAutoAnswerOn] = useState(false);
   const [chatVisible, setChatVisible] = useState(true);
+  const [suggestedVisible, setSuggestedVisible] = useState(true);
   const [transcriptVisible, setTranscriptVisible] = useState(true);
   // Separate from transcriptVisible: only hides the header bar (Transcript + Copy/Export),
   // not the transcript content.
@@ -55,6 +57,9 @@ function MainLayout() {
       document.documentElement.classList.toggle('light', p.theme === 'light');
       document.documentElement.style.setProperty('--transcript-font-size', `${p.font_size}px`);
       setAutoAnswerOn(Boolean(p.auto_answer_enabled));
+      const showBox = p.suggested_answer_visible !== false;
+      setSuggestedVisible(showBox);
+      useAutoAnswerStore.getState().setPanelVisible(showBox);
       setChatVisible(p.chat_panel_visible ?? true);
       setTranscriptVisible(p.transcript_visible !== false);
       setCustomTitlebar(Boolean(p.custom_titlebar));
@@ -82,6 +87,13 @@ function MainLayout() {
 
   const toggleTranscriptBar = () => {
     setTranscriptBarVisible((v) => !v);
+  };
+
+  const toggleSuggested = () => {
+    const next = !suggestedVisible;
+    setSuggestedVisible(next);
+    useAutoAnswerStore.getState().setPanelVisible(next);
+    window.electronAPI.setPreferences({ suggested_answer_visible: next });
   };
 
   const toggleAutoAnswer = () => {
@@ -119,6 +131,8 @@ function MainLayout() {
         onToggleTranscriptBar={toggleTranscriptBar}
         autoAnswerOn={autoAnswerOn}
         onToggleAutoAnswer={toggleAutoAnswer}
+        suggestedVisible={suggestedVisible}
+        onToggleSuggested={toggleSuggested}
         customTitlebar={customTitlebar}
       />
 
@@ -171,7 +185,7 @@ function MainLayout() {
       </div>
 
       {/* Auto-answer suggested-answer band */}
-      {autoAnswerOn && <SuggestedAnswerPanel />}
+      {autoAnswerOn && suggestedVisible && <SuggestedAnswerPanel />}
 
       {/* Settings modal */}
       <Settings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />

@@ -280,6 +280,7 @@ class PrefsUpdate(BaseModel):
     always_on_top: bool | None = None
     transcript_split: float | None = Field(default=None, ge=10, le=90)
     transcript_visible: bool | None = None
+    suggested_answer_visible: bool | None = None
     transcription_engine: Literal["local", "cloud"] | None = None
     cloud_provider: Literal["deepgram"] | None = None
     local_transcribe_mode: Literal["streaming", "legacy"] | None = None

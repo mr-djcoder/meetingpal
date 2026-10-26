@@ -9,6 +9,8 @@ interface Props {
   onToggleTranscriptBar: () => void;
   autoAnswerOn: boolean;
   onToggleAutoAnswer: () => void;
+  suggestedVisible: boolean;
+  onToggleSuggested: () => void;
   customTitlebar: boolean;
 }
 
@@ -26,6 +28,8 @@ export function TopBar({
   onToggleTranscriptBar,
   autoAnswerOn,
   onToggleAutoAnswer,
+  suggestedVisible,
+  onToggleSuggested,
   customTitlebar,
 }: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
@@ -184,6 +188,25 @@ export function TopBar({
             </svg>
           ) : (
             'AI Auto'
+          )}
+        </button>
+
+        {/* Show or hide the Suggested Answer box (answers are not written to it while hidden) */}
+        <button
+          onClick={onToggleSuggested}
+          title={suggestedVisible ? 'Hide suggested answer box' : 'Show suggested answer box'}
+          className={
+            narrow
+              ? `p-1.5 rounded transition-colors ${suggestedVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              : `text-xs px-2 py-1 rounded font-medium transition-colors ${suggestedVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+          }
+        >
+          {narrow ? (
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5h16v14H4zM4 14h16" />
+            </svg>
+          ) : (
+            'Answer box'
           )}
         </button>
 

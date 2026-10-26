@@ -52,6 +52,7 @@ interface UserPreferences {
   always_on_top: boolean;
   transcript_split: number;
   transcript_visible: boolean;
+  suggested_answer_visible: boolean;
   transcription_engine: 'local' | 'cloud';
   cloud_provider: string;
   local_transcribe_mode: 'streaming' | 'legacy';
