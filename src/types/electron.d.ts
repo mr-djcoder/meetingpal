@@ -95,6 +95,7 @@ interface ElectronAPI {
   getDevices(): Promise<{ devices: AudioDevice[] }>;
   startSession(options: StartSessionOptions): Promise<SessionInfo>;
   stopSession(): Promise<SessionSummary>;
+  clearChat(sessionId: string): Promise<void>;
   askQuestion(question: string, sessionId: string, model?: ClaudeModel): Promise<void>;
   getPreferences(): Promise<UserPreferences>;
   setPreferences(partial: Partial<UserPreferences>): Promise<UserPreferences>;

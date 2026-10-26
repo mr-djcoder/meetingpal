@@ -273,6 +273,10 @@ ipcMain.handle('has-gemini-key', async () => {
   return key !== null && key.length > 0;
 });
 
+ipcMain.handle('clear-chat', (_e, sessionId: string) =>
+  apiRequest('POST', '/api/chat/clear', { session_id: sessionId })
+);
+
 ipcMain.handle('get-gemini-models', () => apiRequest('GET', '/api/gemini/models'));
 ipcMain.handle('get-ollama-models', () => apiRequest('GET', '/api/ollama/models'));
 

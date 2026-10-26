@@ -237,3 +237,18 @@ def test_ollama_models_endpoint(client, monkeypatch):
 
     monkeypatch.setattr(main, "list_ollama_models", fake_list)
     assert client.get("/api/ollama/models").json() == {"models": ["qwen3.5:27b"]}
+
+
+def test_clear_chat_forgets_history_and_checks_session(client, fake_workers, monkeypatch):
+    async def fake_ask(**kwargs):
+        yield {"type": "content_delta", "text": "ok"}
+        yield {"type": "message_stop"}
+
+    monkeypatch.setattr(main._claude_client, "ask", fake_ask)
+    sid = client.post("/api/session/start", json={}).json()["session_id"]
+    _ask(client, sid)
+    assert main.active_session.chat_messages
+    assert client.post("/api/chat/clear", json={"session_id": "nope"}).status_code == 404
+    assert client.post("/api/chat/clear", json={"session_id": sid}).status_code == 200
+    assert main.active_session.chat_messages == []
+    client.post("/api/session/stop")

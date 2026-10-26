@@ -6,7 +6,7 @@ interface Props {
 }
 
 export function TranscriptPanel({ headerVisible = true }: Props) {
-  const { segments, sessionId, isRecording, inlineAnswers } = useTranscriptStore();
+  const { segments, sessionId, isRecording, inlineAnswers, clearSegments } = useTranscriptStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [userScrolled, setUserScrolled] = useState(false);
@@ -47,6 +47,14 @@ export function TranscriptPanel({ headerVisible = true }: Props) {
         <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700">
           <span className="text-sm font-medium text-gray-300">Transcript</span>
           <div className="flex items-center gap-2">
+            <button
+              onClick={clearSegments}
+              disabled={segments.length === 0}
+              title="Clear the transcript view (the saved transcript keeps everything)"
+              className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-40 transition-colors"
+            >
+              Clear
+            </button>
             <button
               onClick={handleCopy}
               disabled={!sessionId}

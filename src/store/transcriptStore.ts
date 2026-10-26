@@ -30,6 +30,7 @@ interface TranscriptStore {
   addSegment: (segment: TranscriptSegment) => void;
   removeSegment: (id: string) => void;
   clearSession: () => void;
+  clearSegments: () => void;
   startInlineAnswer: () => void;
   appendInlineToken: (text: string) => void;
   finishInlineAnswer: () => void;
@@ -71,6 +72,9 @@ export const useTranscriptStore = create<TranscriptStore>((set, get) => ({
 
   removeSegment: (id: string) =>
     set((state) => ({ segments: state.segments.filter((s) => s.id !== id) })),
+
+  // Empty the on-screen transcript but keep the session running (the saved transcript is unaffected).
+  clearSegments: () => set({ segments: [], inlineAnswers: {}, inlineAnchor: null }),
 
   clearSession: () =>
     set({

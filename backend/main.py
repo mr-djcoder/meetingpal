@@ -679,6 +679,19 @@ async def ask_ai(body: AskBody, request: Request):
     )
 
 
+class ClearChatBody(BaseModel):
+    session_id: str
+
+
+@app.post("/api/chat/clear")
+def clear_chat(body: ClearChatBody):
+    """Forget the chat history for the live session (the transcript is untouched)."""
+    if not active_session or active_session.id != body.session_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    active_session.chat_messages.clear()
+    return {"status": "ok"}
+
+
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
 

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopSession: () => ipcRenderer.invoke('stop-session'),
 
   // AI Q&A
+  clearChat: (sessionId: string) => ipcRenderer.invoke('clear-chat', sessionId),
   askQuestion: (question: string, sessionId: string, model?: string) =>
     ipcRenderer.invoke('ask-question', { question, sessionId, model }),
 
