@@ -154,7 +154,7 @@ def _on_transcriber_error(message: str) -> None:
 
 
 def _on_transcript_segment(seg: TranscriptSegment) -> None:
-    """Called from transcriber / cloud worker threads — schedule broadcast on event loop."""
+    """Called from transcriber / cloud worker threads; schedule broadcast on event loop."""
     session = active_session
     if prefs.suppress_echo and session is not None:
         if seg.speaker == "Them":

@@ -12,7 +12,6 @@ export interface RecordingState {
 interface StartSessionOptions {
   mic_device_index?: number | null;
   loopback_device_index?: number | null;
-  whisper_model?: string;
   duration_limit_seconds?: number | null;
 }
 

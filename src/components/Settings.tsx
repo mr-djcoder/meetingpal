@@ -10,6 +10,7 @@ interface AudioDevice {
 
 interface UserPreferences {
   whisper_model: string;
+  suppress_echo: boolean;
   claude_model: string;
   mic_device_index: number | null;
   loopback_device_index: number | null;
@@ -58,7 +59,9 @@ export function Settings({ isOpen, onClose }: Props) {
   const [dgKeyInput, setDgKeyInput] = useState('');
   const [cloudAck, setCloudAck] = useState(false);
   const [dgKeySaved, setDgKeySaved] = useState(false);
-  const [engineStatus, setEngineStatus] = useState<{ device: string; model: string } | null>(null);
+  const [engineStatus, setEngineStatus] = useState<
+    { device: string; model: string; overridden: boolean } | null
+  >(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -79,7 +82,7 @@ export function Settings({ isOpen, onClose }: Props) {
     window.electronAPI.hasDeepgramKey().then(setHasDgKey).catch(() => setHasDgKey(false));
     window.electronAPI
       .getEngineStatus()
-      .then((s) => setEngineStatus({ device: s.device, model: s.model }))
+      .then((s) => setEngineStatus({ device: s.device, model: s.model, overridden: s.model_overridden }))
       .catch(() => setEngineStatus(null));
   }, [isOpen]);
 
@@ -187,6 +190,23 @@ export function Settings({ isOpen, onClose }: Props) {
                 { value: 'medium.en', label: 'Medium (slower, more accurate)' },
               ]}
             />
+            {engineStatus?.overridden && engineStatus.device.startsWith('GPU') && (
+              <p className="text-xs text-gray-500 mt-2">
+                Your GPU is in use, so the larger {engineStatus.model} model runs instead. This
+                choice applies on CPU.
+              </p>
+            )}
+            <label className="flex items-center gap-2.5 mt-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={merged.suppress_echo}
+                onChange={(e) => update({ suppress_echo: e.target.checked })}
+                className="accent-blue-500"
+              />
+              <span className="text-sm text-gray-300">
+                Hide my mic text when it only repeats the speakers (no headset)
+              </span>
+            </label>
           </Section>
 
           {/* Transcription Engine */}

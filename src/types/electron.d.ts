@@ -12,7 +12,6 @@ interface AudioDevice {
 interface StartSessionOptions {
   mic_device_index?: number | null;
   loopback_device_index?: number | null;
-  whisper_model?: string;
   duration_limit_seconds?: number | null;
 }
 
@@ -53,6 +52,18 @@ interface UserPreferences {
   transcription_engine: 'local' | 'cloud';
   cloud_provider: string;
   local_transcribe_mode: 'streaming' | 'legacy';
+  suppress_echo: boolean;
+}
+
+interface EngineStatus {
+  engine: string;
+  device: string;
+  model: string;
+  configured_model: string;
+  model_overridden: boolean;
+  mode: string;
+  cloud_provider: string;
+  ready: boolean;
 }
 
 interface AudioLevelFrame {
@@ -81,7 +92,7 @@ interface ElectronAPI {
   getDevices(): Promise<{ devices: AudioDevice[] }>;
   startSession(options: StartSessionOptions): Promise<SessionInfo>;
   stopSession(): Promise<SessionSummary>;
-  askQuestion(question: string, model?: ClaudeModel): Promise<void>;
+  askQuestion(question: string, sessionId: string, model?: ClaudeModel): Promise<void>;
   getPreferences(): Promise<UserPreferences>;
   setPreferences(partial: Partial<UserPreferences>): Promise<UserPreferences>;
   setApiKey(key: string): Promise<void>;
@@ -91,8 +102,9 @@ interface ElectronAPI {
   getGeminiModels(): Promise<{ models: string[] }>;
   setDeepgramKey(key: string): Promise<void>;
   hasDeepgramKey(): Promise<boolean>;
-  getEngineStatus(): Promise<{ engine: string; device: string; model: string; mode: string; cloud_provider: string; ready: boolean }>;
+  getEngineStatus(): Promise<EngineStatus>;
   onTranscriptSegment(cb: (segment: TranscriptSegment) => void): () => void;
+  onTranscriptRemove(cb: (msg: { id: string }) => void): () => void;
   onAudioLevel(cb: (frame: AudioLevelFrame) => void): () => void;
   onAiToken(cb: (token: string) => void): () => void;
   onAiDone(cb: (summary: AiMessageSummary) => void): () => void;

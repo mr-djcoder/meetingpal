@@ -7,8 +7,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopSession: () => ipcRenderer.invoke('stop-session'),
 
   // AI Q&A
-  askQuestion: (question: string, model?: string) =>
-    ipcRenderer.invoke('ask-question', { question, model }),
+  askQuestion: (question: string, sessionId: string, model?: string) =>
+    ipcRenderer.invoke('ask-question', { question, sessionId, model }),
 
   // Preferences
   getPreferences: () => ipcRenderer.invoke('get-preferences'),
@@ -35,6 +35,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_: Electron.IpcRendererEvent, segment: unknown) => cb(segment);
     ipcRenderer.on('transcript-segment', handler);
     return () => ipcRenderer.removeListener('transcript-segment', handler);
+  },
+  onTranscriptRemove: (cb: (msg: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, msg: unknown) => cb(msg);
+    ipcRenderer.on('transcript-remove', handler);
+    return () => ipcRenderer.removeListener('transcript-remove', handler);
   },
   onAudioLevel: (cb: (frame: unknown) => void) => {
     const handler = (_: Electron.IpcRendererEvent, frame: unknown) => cb(frame);

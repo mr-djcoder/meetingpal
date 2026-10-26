@@ -7,10 +7,10 @@ Auto-generated from project constitution. Last updated: 2026-03-12
 - JSON file (`%APPDATA%\MeetingPal\preferences.json`), Markdown files per session, Windows Credential Manager (keytar) (001-meetingpal-core-app)
 
 - TypeScript + React 18 + Electron 30 (frontend/desktop shell)
-- Python 3.11 + FastAPI + faster-whisper (backend sidecar)
+- Python 3.12 + FastAPI + faster-whisper (backend sidecar)
 - TailwindCSS + Zustand (UI styling and state)
 - sounddevice + PyAudio (WASAPI audio capture)
-- Silero VAD + pyannote.audio (voice activity detection + diarization)
+- Silero VAD (voice activity detection); speaker label comes from the audio source (mic = You, loopback = Them)
 - anthropic SDK (Claude API — claude-sonnet-4-6 default)
 
 ## Project Structure
@@ -40,7 +40,6 @@ meetingpal/
 │   ├── audio_capture.py     # sounddevice + WASAPI loopback capture
 │   ├── transcriber.py       # faster-whisper pipeline
 │   ├── vad.py               # Silero VAD integration
-│   ├── diarizer.py          # pyannote speaker diarization
 │   ├── claude_client.py     # Anthropic SDK, streaming Q&A
 │   └── storage.py           # Transcript save/load
 ├── specs/                   # Feature specs (speckit workflow)
@@ -80,12 +79,12 @@ bash .specify/scripts/bash/update-agent-context.sh claude           # Refresh th
 
 ## Key Constraints
 
-- Audio capture: WASAPI loopback (system audio) + default mic, mixed at 16kHz mono
+- Audio capture: WASAPI loopback (system audio) and mic, kept as two separate 16kHz mono streams
 - Transcription: faster-whisper local only — no audio leaves the machine
-- Chunking: 3-second rolling chunks with 0.5s overlap for real-time transcription
-- Claude context: last N transcript segments up to ~80K tokens per request
+- Audio: PortAudio callback streams into native-rate ring buffers, cut into 0.5s frames, polyphase-resampled to 16kHz mono; silent frames are synthesized when a source goes quiet (WASAPI loopback emits nothing during silence)
+- Claude context: newest transcript segments up to ~60K tokens, sent as cacheable blocks
 - Claude responses: SSE streaming, token-by-token to frontend
-- Transcript storage: `C:\Users\<user>\Documents\MeetingPal\recordings\YYYY-MM-DD_HH-MM\`
+- Transcript storage: `C:\Users\<user>\Documents\MeetingPal\recordings\YYYY-MM-DD_HH-MM-SS\`
 
 ## Recent Changes
 - 001-meetingpal-core-app: Added TypeScript 5 (Electron/React), Python 3.11+
@@ -94,8 +93,8 @@ bash .specify/scripts/bash/update-agent-context.sh claude           # Refresh th
 - 001-meetingpal-core-app: Full implementation complete (2026-03-16)
   - PyAudioWPatch WASAPI loopback + mic capture, mixed at 16kHz mono
   - faster-whisper real-time transcription (base.en default, GPU/CPU fallback)
-  - Silero VAD gating on 3s rolling chunks with 0.5s overlap
-  - Mic/loopback energy heuristic diarization → "You" / "Them" labels
+  - Silero VAD gating per 0.5s frame; streaming LocalAgreement assembler
+  - Speaker labels by audio source: mic = "You", loopback = "Them"; echo of the speakers on the mic is suppressed
   - Claude SSE streaming via FastAPI StreamingResponse + Anthropic SDK
   - keytar Windows Credential Manager for API key (never on disk)
   - Electron 30 + React 18 + TailwindCSS + Zustand state management
@@ -103,7 +102,15 @@ bash .specify/scripts/bash/update-agent-context.sh claude           # Refresh th
   - Settings modal: model selection, device picker, theme, font size, auto-save
   - Transcript auto-save to dated folder (transcript.md + qa_log.md)
   - Copy/Export transcript (clipboard + .txt/.md via save dialog)
-  - SidecarManager: spawn, health poll, crash restart (3×), SIGTERM/SIGKILL shutdown
+  - SidecarManager: random port + per-launch token, health poll, exponential crash restart (crash budget resets after 60s up), graceful /api/shutdown then kill
+
 
 <!-- MANUAL ADDITIONS START -->
+## Sidecar Security and Durability
+
+- Every sidecar HTTP route and `/ws` requires the per-launch token (`MEETINGPAL_TOKEN`, header `x-meetingpal-token`, or `?token=` on the WebSocket). Browser origins are rejected on `/ws`. There is no CORS.
+- Finalized segments are appended to `segments.jsonl` in the session folder as they arrive; `transcript.md` and `qa_log.md` are written at stop. Session folders are named to the second (`YYYY-MM-DD_HH-MM-SS`).
+- Blocking work (PortAudio init, cloud connect, final decode, saving) runs in `asyncio.to_thread`, never on the event loop.
+- Known remaining risk: VAD, Whisper, capture and API still share one process. A native fault restarts the sidecar and ends the live session (text so far is journaled). Splitting inference into its own process is the next step if crashes continue.
+
 <!-- MANUAL ADDITIONS END -->

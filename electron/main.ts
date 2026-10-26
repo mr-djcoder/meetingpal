@@ -1,18 +1,17 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron';
 import * as path from 'path';
 import * as keytar from 'keytar';
-import { SidecarManager } from './sidecar';
+import { SidecarManager, TOKEN_HEADER } from './sidecar';
 
 const KEYTAR_SERVICE = 'MeetingPal';
 const KEYTAR_ACCOUNT = 'anthropic-api-key';
 const GEMINI_ACCOUNT = 'gemini-api-key';
 const DEEPGRAM_ACCOUNT = 'deepgram-api-key';
-const SIDECAR_PORT = 8001;
-const BASE_URL = `http://127.0.0.1:${SIDECAR_PORT}`;
 
 const sidecar = new SidecarManager();
 let mainWindow: BrowserWindow | null = null;
 let wsConnection: import('ws').WebSocket | null = null;
+let quitting = false;
 
 // ── Window ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +59,15 @@ function createWindow(customTitlebar: boolean): void {
     console.log(`[render-process-gone] ${JSON.stringify(details)}`);
   });
 
+  // The app is a single local page: never open new windows, never navigate away from it.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const allowed = MAIN_WINDOW_VITE_DEV_SERVER_URL
+      ? url.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL)
+      : url.startsWith('file://');
+    if (!allowed) event.preventDefault();
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -69,7 +77,7 @@ function createWindow(customTitlebar: boolean): void {
 
 function connectWebSocket(): void {
   const WebSocket = require('ws');
-  const ws = new WebSocket(`ws://127.0.0.1:${SIDECAR_PORT}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${sidecar.port}/ws?token=${sidecar.token}`);
   wsConnection = ws;
 
   ws.on('message', (raw: Buffer) => {
@@ -79,6 +87,9 @@ function connectWebSocket(): void {
       switch (msg.type) {
         case 'transcript_segment':
           mainWindow.webContents.send('transcript-segment', msg);
+          break;
+        case 'transcript_remove':
+          mainWindow.webContents.send('transcript-remove', msg);
           break;
         case 'audio_level':
           mainWindow.webContents.send('audio-level', msg);
@@ -111,7 +122,7 @@ function connectWebSocket(): void {
   });
 
   ws.on('close', () => {
-    setTimeout(connectWebSocket, 2000);
+    if (!quitting) setTimeout(connectWebSocket, 2000);
   });
   ws.on('error', () => {
     /* reconnect handled by close */
@@ -121,25 +132,25 @@ function connectWebSocket(): void {
 // ── API request helper ────────────────────────────────────────────────────────
 
 const API_TIMEOUT_MS = 8000;
+// Start connects to audio devices (and cloud sockets); stop finishes the last decode and
+// saves the session. Both legitimately take longer than an ordinary request.
+const SLOW_API_TIMEOUT_MS = 45000;
+const SLOW_PATHS = new Set(['/api/session/start', '/api/session/stop']);
 
 async function apiRequest<T>(
   method: string,
   path: string,
   body?: unknown
 ): Promise<T> {
-  const apiKey = await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
   // Time-bound the request: without this, a crashed/unreachable sidecar makes fetch
-  // hang forever — which left the Stop button stuck (the renderer awaited stopSession
-  // and never got a resolution/rejection to run its reset).
+  // hang forever, which left the Stop button stuck.
+  const timeoutMs = SLOW_PATHS.has(path) ? SLOW_API_TIMEOUT_MS : API_TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const res = await fetch(`${sidecar.baseUrl}${path}`, {
       method,
-      headers,
+      headers: { 'Content-Type': 'application/json', [TOKEN_HEADER]: sidecar.token },
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
@@ -150,7 +161,7 @@ async function apiRequest<T>(
     return res.json() as Promise<T>;
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      throw new Error(`Sidecar ${method} ${path} timed out after ${API_TIMEOUT_MS}ms`);
+      throw new Error(`Sidecar ${method} ${path} timed out after ${timeoutMs}ms`);
     }
     throw err;
   } finally {
@@ -168,32 +179,55 @@ ipcMain.handle('start-session', (_e, options) =>
 
 ipcMain.handle('stop-session', () => apiRequest('POST', '/api/session/stop', {}));
 
-ipcMain.handle('ask-question', async (_e, { question, model }) => {
+ipcMain.handle('ask-question', async (_e, { question, sessionId, model }) => {
+  // The Claude key goes only to the one endpoint that needs it, as a per-request header.
   const apiKey = await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
   const preferences = await apiRequest<{ claude_model: string }>('GET', '/api/preferences');
   const claudeModel = model || preferences.claude_model || 'claude-sonnet-4-6';
 
-  // We need session_id from active session — get it from last start response cached in store
-  // For simplicity: fetch preferences which has session context from a GET
-  // Actually we need a session_id — pass it from the renderer via the question call
-  // This is handled: question contains session_id via the ask endpoint
-  // Re-route: just forward to /api/ask as SSE and relay tokens
-  const res = await fetch(`${BASE_URL}/api/ask`, {
+  const res = await fetch(`${sidecar.baseUrl}/api/ask`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      [TOKEN_HEADER]: sidecar.token,
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
-    body: JSON.stringify({ question, claude_model: claudeModel }),
+    body: JSON.stringify({ question, session_id: sessionId, claude_model: claudeModel }),
   });
 
   if (!res.ok || !res.body) {
-    throw new Error(`Ask failed: ${res.status}`);
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Ask failed: ${res.status} ${detail}`.trim());
   }
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let finished = false;
+
+  const handlePart = (part: string) => {
+    const dataLine = part.split('\n').find((l) => l.startsWith('data:'));
+    const eventLine = part.split('\n').find((l) => l.startsWith('event:'));
+    if (!dataLine) return;
+    try {
+      const event = JSON.parse(dataLine.slice(5).trim());
+      const eventType = eventLine ? eventLine.slice(6).trim() : 'content_delta';
+      if (eventType === 'content_delta' && event.text) {
+        mainWindow?.webContents.send('ai-token', event.text);
+      } else if (eventType === 'message_stop') {
+        finished = true;
+        mainWindow?.webContents.send('ai-done', event);
+      } else if (eventType === 'error') {
+        finished = true;
+        mainWindow?.webContents.send('sidecar-error', {
+          type: 'error', code: 'ask_failed', message: event.message ?? 'Ask failed', recoverable: true,
+        });
+        mainWindow?.webContents.send('ai-done', event);
+      }
+    } catch {
+      // ignore malformed event
+    }
+  };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -201,25 +235,12 @@ ipcMain.handle('ask-question', async (_e, { question, model }) => {
     buffer += decoder.decode(value, { stream: true });
     const parts = buffer.split('\n\n');
     buffer = parts.pop() ?? '';
-    for (const part of parts) {
-      const dataLine = part.split('\n').find((l) => l.startsWith('data:'));
-      const eventLine = part.split('\n').find((l) => l.startsWith('event:'));
-      if (!dataLine) continue;
-      try {
-        const event = JSON.parse(dataLine.slice(5).trim());
-        const eventType = eventLine ? eventLine.slice(6).trim() : 'content_delta';
-        if (eventType === 'content_delta' && event.text) {
-          mainWindow?.webContents.send('ai-token', event.text);
-        } else if (eventType === 'message_stop') {
-          mainWindow?.webContents.send('ai-done', event);
-        } else if (eventType === 'error') {
-          mainWindow?.webContents.send('sidecar-error', event);
-        }
-      } catch {
-        // ignore
-      }
-    }
+    parts.forEach(handlePart);
   }
+  if (buffer.trim()) handlePart(buffer);
+  // Stream ended without a terminal event (dropped connection): never leave the chat
+  // panel stuck in "streaming".
+  if (!finished) mainWindow?.webContents.send('ai-done', { stop_reason: 'interrupted' });
 });
 
 ipcMain.handle('get-preferences', () => apiRequest('GET', '/api/preferences'));
@@ -323,7 +344,15 @@ ipcMain.handle('export-transcript', async (_e, { sessionId, format }: { sessionI
   return filePath;
 });
 
-ipcMain.handle('open-folder', (_e, folderPath: string) => shell.openPath(folderPath));
+// Only ever open a folder inside the configured recordings directory: shell.openPath
+// launches files too, so an arbitrary path from the renderer would be a code-launch hole.
+ipcMain.handle('open-folder', async (_e, folderPath: string) => {
+  const { save_path } = await apiRequest<{ save_path: string }>('GET', '/api/preferences');
+  const root = path.resolve(save_path);
+  const target = path.resolve(String(folderPath));
+  if (target !== root && !target.startsWith(root + path.sep)) return 'Path outside recordings folder';
+  return shell.openPath(target);
+});
 
 // Custom title bar window controls
 ipcMain.handle('window-minimize', () => mainWindow?.minimize());
@@ -383,6 +412,16 @@ async function syncKeysToSidecar(): Promise<void> {
 
 app.on('ready', async () => {
   try {
+    sidecar.onRestarted = () => {
+      // A restarted sidecar has no keys and no session. Re-push the keys and tell the
+      // renderer, which still believes a recording is running.
+      void syncKeysToSidecar();
+      mainWindow?.webContents.send('sidecar-error', {
+        type: 'error', code: 'sidecar_restarted', recoverable: true,
+        message: 'The audio engine restarted. The recording was stopped; start a new one. '
+          + 'Text captured so far was saved to your recordings folder.',
+      });
+    };
     await sidecar.spawn();
     connectWebSocket();
     await syncKeysToSidecar();
@@ -400,9 +439,16 @@ app.on('ready', async () => {
   }
 });
 
-app.on('before-quit', async () => {
+app.on('before-quit', async (event) => {
+  if (quitting) return;
+  quitting = true;
+  event.preventDefault(); // wait for the sidecar to save a live session, then really quit
   wsConnection?.close();
-  await sidecar.shutdown();
+  try {
+    await sidecar.shutdown();
+  } finally {
+    app.quit();
+  }
 });
 
 app.on('window-all-closed', () => {

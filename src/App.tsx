@@ -15,11 +15,6 @@ interface SidecarError {
   recoverable: boolean;
 }
 
-interface ModelDownloadProgress {
-  type: 'model_download_progress';
-  percent: number;
-}
-
 function MainLayout() {
   useWebSocket(); // sets up transcript + auto-answer IPC subscriptions
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -33,9 +28,9 @@ function MainLayout() {
   const [splitPct, setSplitPct] = useState(60);
   const [opacityPct, setOpacityPct] = useState(100);
   const panelsRef = useRef<HTMLDivElement>(null);
+  const splitRef = useRef(60); // latest divider position, readable from drag handlers
   const [errorBanner, setErrorBanner] = useState<SidecarError | null>(null);
   const [errorModal, setErrorModal] = useState<SidecarError | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
 
   useEffect(() => {
     const offError = window.electronAPI.onError((err) => {
@@ -48,47 +43,25 @@ function MainLayout() {
       }
     });
 
-    // Model download progress
-    const offProgress = (window as unknown as { electronAPI: { onModelDownloadProgress?: (cb: (p: unknown) => void) => () => void } }).electronAPI.onModelDownloadProgress;
-    let offDl: (() => void) | undefined;
-    if (offProgress) {
-      offDl = offProgress((p) => {
-        const progress = p as ModelDownloadProgress;
-        setDownloadProgress(progress.percent);
-        if (progress.percent >= 1) {
-          setTimeout(() => setDownloadProgress(null), 1000);
-        }
-      });
-    }
-
     return () => {
       offError();
-      offDl?.();
     };
   }, []);
 
   // Theme / font-size reactivity from preferences
   useEffect(() => {
-    window.electronAPI.getPreferences().then((prefs) => {
-      const p = prefs as { theme: string; font_size: number };
+    window.electronAPI.getPreferences().then((p) => {
       document.documentElement.classList.toggle('dark', p.theme === 'dark');
       document.documentElement.classList.toggle('light', p.theme === 'light');
       document.documentElement.style.setProperty('--transcript-font-size', `${p.font_size}px`);
-      const aa = prefs as unknown as {
-        auto_answer_enabled?: boolean;
-        chat_panel_visible?: boolean;
-        custom_titlebar?: boolean;
-        window_opacity?: number;
-        transcript_split?: number;
-        transcript_visible?: boolean;
-      };
-      setAutoAnswerOn(Boolean(aa.auto_answer_enabled));
-      setChatVisible(aa.chat_panel_visible ?? true);
-      setTranscriptVisible(aa.transcript_visible !== false);
-      setCustomTitlebar(Boolean(aa.custom_titlebar));
-      setSplitPct(aa.transcript_split ?? 60);
-      setOpacityPct(Math.round((aa.window_opacity ?? 1) * 100));
-      window.electronAPI.setOpacity(aa.window_opacity ?? 1);
+      setAutoAnswerOn(Boolean(p.auto_answer_enabled));
+      setChatVisible(p.chat_panel_visible ?? true);
+      setTranscriptVisible(p.transcript_visible !== false);
+      setCustomTitlebar(Boolean(p.custom_titlebar));
+      splitRef.current = p.transcript_split ?? 60;
+      setSplitPct(splitRef.current);
+      setOpacityPct(Math.round((p.window_opacity ?? 1) * 100));
+      window.electronAPI.setOpacity(p.window_opacity ?? 1);
     });
   }, [settingsOpen]); // re-apply after settings close
 
@@ -96,15 +69,15 @@ function MainLayout() {
     setOpacityPct(pct);
     const frac = pct / 100;
     window.electronAPI.setOpacity(frac);
-    window.electronAPI.setPreferences({ window_opacity: frac } as never);
+    window.electronAPI.setPreferences({ window_opacity: frac });
   };
 
   const toggleChat = () => {
     const next = !chatVisible;
     setChatVisible(next);
-    window.electronAPI.setPreferences({ chat_panel_visible: next } as never);
-    // Snap window to a comfortable width whenever the AI panel is toggled.
-    window.electronAPI.setWindowWidth(750);
+    window.electronAPI.setPreferences({ chat_panel_visible: next });
+    // Make room when the AI panel opens; closing it leaves the user's width alone.
+    if (next) window.electronAPI.setWindowWidth(750);
   };
 
   const toggleTranscriptBar = () => {
@@ -114,7 +87,7 @@ function MainLayout() {
   const toggleAutoAnswer = () => {
     const next = !autoAnswerOn;
     setAutoAnswerOn(next);
-    window.electronAPI.setPreferences({ auto_answer_enabled: next } as never);
+    window.electronAPI.setPreferences({ auto_answer_enabled: next });
   };
 
   const startDividerDrag = (e: React.MouseEvent) => {
@@ -123,15 +96,13 @@ function MainLayout() {
       const rect = panelsRef.current?.getBoundingClientRect();
       if (!rect || rect.width === 0) return;
       const pct = ((ev.clientX - rect.left) / rect.width) * 100;
-      setSplitPct(Math.min(80, Math.max(20, pct)));
+      splitRef.current = Math.min(80, Math.max(20, pct));
+      setSplitPct(splitRef.current);
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      setSplitPct((p) => {
-        window.electronAPI.setPreferences({ transcript_split: p } as never);
-        return p;
-      });
+      window.electronAPI.setPreferences({ transcript_split: splitRef.current });
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -172,21 +143,6 @@ function MainLayout() {
           <button onClick={() => setErrorBanner(null)} className="ml-4 text-yellow-400 hover:text-yellow-200">
             ×
           </button>
-        </div>
-      )}
-
-      {/* Model download progress */}
-      {downloadProgress !== null && (
-        <div className="bg-blue-900/80 text-blue-200 text-sm px-4 py-2">
-          <div className="flex items-center gap-3">
-            <span>Downloading Whisper model… {Math.round(downloadProgress * 100)}%</span>
-            <div className="flex-1 h-1.5 bg-blue-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-blue-400 rounded-full transition-all"
-                style={{ width: `${downloadProgress * 100}%` }}
-              />
-            </div>
-          </div>
         </div>
       )}
 

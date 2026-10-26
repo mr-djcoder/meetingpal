@@ -29,7 +29,7 @@ export function AIChatPanel() {
     setError(null);
     addUserMessage(question);
     try {
-      await window.electronAPI.askQuestion(question);
+      await window.electronAPI.askQuestion(question, sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     }

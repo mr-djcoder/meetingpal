@@ -1,25 +1,27 @@
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, execFileSync, spawn } from 'child_process';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as http from 'http';
+import * as net from 'net';
 import * as path from 'path';
 import { app } from 'electron';
 
-const PORT = 8001;
-const HEALTH_URL = `http://127.0.0.1:${PORT}/health`;
-// ~60s at 500ms poll — dual-stream loads two Silero VAD models, so cold model
-// load can exceed the old 15s budget on slower/CPU machines.
+export const TOKEN_HEADER = 'x-meetingpal-token';
+
+// ~60s at 500ms poll: cold model load can exceed 15s on slower/CPU machines.
 const MAX_HEALTH_RETRIES = 120;
 const HEALTH_POLL_MS = 500;
 const MAX_CRASH_RESTARTS = 20;
-const CRASH_RESTART_DELAY_MS = 2000;
-const CRASH_RESTART_MAX_DELAY_MS = 15000;
+const CRASH_RESTART_BASE_MS = 2000;
+const CRASH_RESTART_MAX_MS = 30000;
+// A sidecar that stays up this long counts as healthy again: the crash budget resets so
+// 20 is "consecutive crashes", not "crashes over the app's lifetime".
+const STABLE_UPTIME_MS = 60000;
+// Graceful shutdown saves a live session to disk, which can take a few seconds.
+const SHUTDOWN_GRACE_MS = 8000;
 
 function getSidecarPath(): string {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'sidecar', 'meetingpal', 'meetingpal.exe');
-  }
-  // Dev: assume Python is on PATH and run backend/main.py directly
-  return process.execPath; // placeholder; see _buildArgs
+  return path.join(process.resourcesPath, 'sidecar', 'meetingpal', 'meetingpal.exe');
 }
 
 function getLogPath(): string {
@@ -28,100 +30,132 @@ function getLogPath(): string {
   return path.join(logDir, 'sidecar.log');
 }
 
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address() as net.AddressInfo;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 export class SidecarManager {
   private process: ChildProcess | null = null;
   private logStream: fs.WriteStream | null = null;
   private crashCount = 0;
   private stopping = false;
+  private startedAt = 0;
+  private _port = 0;
+  // Per-launch shared secret. The sidecar rejects every request without it, so other
+  // local processes and web pages cannot talk to it (or read the live transcript).
+  readonly token = crypto.randomBytes(32).toString('hex');
+
+  /** Called after the sidecar comes back from a crash (its in-memory state is gone). */
+  onRestarted: (() => void) | null = null;
+
+  get port(): number {
+    return this._port;
+  }
+
+  get baseUrl(): string {
+    return `http://127.0.0.1:${this._port}`;
+  }
 
   async spawn(): Promise<void> {
     this.stopping = false;
-    await this._spawnProcess();
+    this._port = await freePort();
+    this.logStream = fs.createWriteStream(getLogPath(), { flags: 'a' });
+    this._spawnProcess();
     await this._pollHealth();
   }
 
   async shutdown(): Promise<void> {
     this.stopping = true;
-    if (!this.process) return;
-    this.process.kill('SIGTERM');
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        this.process?.kill('SIGKILL');
-        resolve();
-      }, 3000);
-      this.process!.once('exit', () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
+    const proc = this.process;
+    if (!proc) return;
+    const exited = proc.exitCode !== null
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => proc.once('exit', () => resolve()));
+    // Ask politely first: the sidecar stops capture and saves the session. On Windows
+    // kill('SIGTERM') is an immediate hard kill, which would lose a live recording.
+    try {
+      await httpRequest('POST', `${this.baseUrl}/api/shutdown`, this.token, 2000);
+    } catch {
+      // already gone or unresponsive; fall through to the kill below
+    }
+    const timedOut = await Promise.race([
+      exited.then(() => false),
+      sleep(SHUTDOWN_GRACE_MS).then(() => true),
+    ]);
+    if (timedOut) proc.kill('SIGKILL');
     this.logStream?.end();
+    this.logStream = null;
     this.process = null;
   }
 
-  get port(): number {
-    return PORT;
-  }
-
   private _buildArgs(): { cmd: string; args: string[] } {
+    const portArgs = ['--port', String(this._port)];
     if (app.isPackaged) {
-      return { cmd: getSidecarPath(), args: ['--port', String(PORT)] };
+      return { cmd: getSidecarPath(), args: portArgs };
     }
-    // Development: run with Python
-    // On Windows, 'python' may resolve to the Microsoft Store stub which has no
-    // packages installed. Verify uvicorn is importable before accepting a candidate.
-    // Prefer known install paths first so we skip the stub quickly.
+    // Development: run with Python. On Windows 'python' may resolve to the Microsoft
+    // Store stub, which has no packages, so accept a candidate only if uvicorn imports.
+    const local = process.env['LOCALAPPDATA'] ?? '';
     const pythonCandidates = process.platform === 'win32'
       ? [
-          path.join(process.env['LOCALAPPDATA'] ?? '', 'Programs', 'Python', 'Python312', 'python.exe'),
-          path.join(process.env['LOCALAPPDATA'] ?? '', 'Programs', 'Python', 'Python311', 'python.exe'),
+          path.join(local, 'Programs', 'Python', 'Python312', 'python.exe'),
+          path.join(local, 'Programs', 'Python', 'Python311', 'python.exe'),
           'python3',
           'python',
         ]
       : ['python3', 'python'];
     const pythonCmd = pythonCandidates.find((p) => {
       try {
-        require('child_process').execFileSync(p, ['-c', 'import uvicorn'], { timeout: 5000 });
+        execFileSync(p, ['-c', 'import uvicorn'], { timeout: 5000 });
         return true;
       } catch { return false; }
     }) ?? 'python';
-    return {
-      cmd: pythonCmd,
-      args: ['-m', 'backend.main', '--port', String(PORT)],
-    };
+    return { cmd: pythonCmd, args: ['-m', 'backend.main', ...portArgs] };
   }
 
-  private async _spawnProcess(): Promise<void> {
-    const logPath = getLogPath();
-    this.logStream = fs.createWriteStream(logPath, { flags: 'a' });
-
+  private _spawnProcess(): void {
     const { cmd, args } = this._buildArgs();
-    this.process = spawn(cmd, args, {
+    const proc = spawn(cmd, args, {
       stdio: 'pipe',
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      env: { ...process.env, PYTHONUNBUFFERED: '1', MEETINGPAL_TOKEN: this.token },
     });
+    this.process = proc;
+    this.startedAt = Date.now();
 
     const timestamp = () => new Date().toISOString();
-    this.process.stdout?.on('data', (d: Buffer) => {
-      const msg = `[${timestamp()}] STDOUT: ${d.toString()}`;
-      this.logStream?.write(msg);
+    proc.stdout?.on('data', (d: Buffer) => {
+      this.logStream?.write(`[${timestamp()}] STDOUT: ${d.toString()}`);
     });
-    this.process.stderr?.on('data', (d: Buffer) => {
-      const msg = `[${timestamp()}] STDERR: ${d.toString()}`;
-      this.logStream?.write(msg);
+    proc.stderr?.on('data', (d: Buffer) => {
+      this.logStream?.write(`[${timestamp()}] STDERR: ${d.toString()}`);
     });
 
-    this.process.once('exit', (code) => {
-      if (!this.stopping && this.crashCount < MAX_CRASH_RESTARTS) {
-        this.crashCount++;
-        // Exponential backoff capped at max delay so rapid crashes don't spin-loop
-        const delay = Math.min(CRASH_RESTART_DELAY_MS * this.crashCount, CRASH_RESTART_MAX_DELAY_MS);
-        this.logStream?.write(
-          `[${timestamp()}] CRASH #${this.crashCount} (code=${code}), restarting in ${delay}ms\n`
-        );
-        setTimeout(() => {
-          if (!this.stopping) this._spawnProcess();
-        }, delay);
+    proc.once('exit', (code) => {
+      if (this.stopping || this.process !== proc) return;
+      if (Date.now() - this.startedAt >= STABLE_UPTIME_MS) this.crashCount = 0;
+      if (this.crashCount >= MAX_CRASH_RESTARTS) {
+        this.logStream?.write(`[${timestamp()}] CRASH LOOP: giving up after ${this.crashCount} restarts\n`);
+        return;
       }
+      this.crashCount++;
+      const delay = Math.min(CRASH_RESTART_BASE_MS * 2 ** (this.crashCount - 1), CRASH_RESTART_MAX_MS);
+      this.logStream?.write(
+        `[${timestamp()}] CRASH #${this.crashCount} (code=${code}), restarting in ${delay}ms\n`
+      );
+      setTimeout(() => {
+        if (this.stopping) return;
+        this._spawnProcess();
+        this._pollHealth()
+          .then(() => { if (!this.stopping) this.onRestarted?.(); })
+          .catch((err) => this.logStream?.write(`[${timestamp()}] restart failed: ${err}\n`));
+      }, delay);
     });
   }
 
@@ -129,8 +163,7 @@ export class SidecarManager {
     for (let i = 0; i < MAX_HEALTH_RETRIES; i++) {
       await sleep(HEALTH_POLL_MS);
       try {
-        const ok = await httpGet(HEALTH_URL);
-        if (ok) return;
+        if (await httpRequest('GET', `${this.baseUrl}/health`, this.token, 400)) return;
       } catch {
         // Not ready yet
       }
@@ -143,13 +176,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function httpGet(url: string): Promise<boolean> {
+function httpRequest(method: string, url: string, token: string, timeoutMs: number): Promise<boolean> {
   return new Promise((resolve, reject) => {
-    const req = http.get(url, (res) => {
+    const req = http.request(url, { method, headers: { [TOKEN_HEADER]: token } }, (res) => {
       resolve(res.statusCode === 200);
       res.resume();
     });
     req.on('error', reject);
-    req.setTimeout(400, () => { req.destroy(); reject(new Error('timeout')); });
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('timeout')); });
+    req.end();
   });
 }

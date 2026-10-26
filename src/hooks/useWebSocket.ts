@@ -17,6 +17,7 @@ export interface AudioLevels {
 
 export function useWebSocket(): AudioLevels {
   const addSegment = useTranscriptStore((s) => s.addSegment);
+  const removeSegment = useTranscriptStore((s) => s.removeSegment);
   const appendToken = useChatStore((s) => s.appendToken);
   const finalizeAssistantMessage = useChatStore((s) => s.finalizeAssistantMessage);
 
@@ -29,6 +30,8 @@ export function useWebSocket(): AudioLevels {
     const offTranscript = api.onTranscriptSegment((segment) => {
       addSegment(segment as Parameters<typeof addSegment>[0]);
     });
+
+    const offRemove = api.onTranscriptRemove((m) => removeSegment(m.id));
 
     const offAudio = api.onAudioLevel((frame) => {
       const f = frame as AudioLevelFrame;
@@ -45,6 +48,11 @@ export function useWebSocket(): AudioLevels {
 
     const offError = api.onError((error) => {
       console.error('[sidecar error]', error);
+      // The sidecar restarted: its session is gone, so don't keep showing "recording".
+      if (error.code === 'sidecar_restarted') {
+        useTranscriptStore.getState().stopSession();
+        useAutoAnswerStore.getState().clear();
+      }
     });
 
     const aa = useAutoAnswerStore.getState;
@@ -64,13 +72,13 @@ export function useWebSocket(): AudioLevels {
     const offAaError = api.onAutoAnswerError((m) => aa().setError(m.message));
 
     cleanupRefs.current = [
-      offTranscript, offAudio, offToken, offDone, offError,
+      offTranscript, offRemove, offAudio, offToken, offDone, offError,
       offAaStart, offAaToken, offAaDone, offAaError,
     ];
     return () => {
       cleanupRefs.current.forEach((fn) => fn());
     };
-  }, [addSegment, appendToken, finalizeAssistantMessage]);
+  }, [addSegment, removeSegment, appendToken, finalizeAssistantMessage]);
 
   return audioLevels;
 }

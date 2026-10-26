@@ -56,8 +56,7 @@ export function TopBar({
     window.electronAPI
       .getPreferences()
       .then((p) => {
-        const prefs = p as unknown as { always_on_top?: boolean };
-        const top = Boolean(prefs.always_on_top);
+        const top = Boolean(p.always_on_top);
         setPinned(top);
         window.electronAPI.setAlwaysOnTop(top); // restore OS window state
       })
@@ -76,7 +75,7 @@ export function TopBar({
     const next = !pinned;
     setPinned(next);
     await window.electronAPI.setAlwaysOnTop(next);
-    await window.electronAPI.setPreferences({ always_on_top: next } as never);
+    await window.electronAPI.setPreferences({ always_on_top: next });
   };
 
   const handleToggle = async () => {
