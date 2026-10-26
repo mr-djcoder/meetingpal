@@ -38,7 +38,9 @@ def test_commit_on_two_agreeing_hypotheses():
     def fake_transcribe(buf, beam, initial_prompt=""):
         return next(calls)
 
-    a = StreamingUtteranceAssembler(fake_transcribe, emitted.append, "s", speaker="You")
+    a = StreamingUtteranceAssembler(
+        fake_transcribe, emitted.append, "s", speaker="You", partial_interval_s=1.0
+    )
     SR = 16000
     speech = np.ones(int(0.5 * SR), dtype=np.float32) * 0.1
     now = datetime.now()
