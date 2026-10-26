@@ -34,6 +34,7 @@ from backend.auto_answer import AutoAnswerOrchestrator
 from backend.claude_client import ClaudeClient
 from backend.echo import EchoFilter
 from backend.gemini_client import GeminiClient, list_gemini_models
+from backend.ollama_client import OllamaClient, list_ollama_models, warm_up as warm_up_ollama
 from backend.models import ChatMessage, RecordingSession, TranscriptSegment, to_utc_iso
 from backend.storage import (
     UserPreferences,
@@ -70,6 +71,7 @@ _echo_ids: set[str] = set()  # utterance ids already identified as mic echo
 
 _claude_client = ClaudeClient()
 _gemini_client = GeminiClient()
+_ollama_client = OllamaClient()
 auto_answer: AutoAnswerOrchestrator | None = None  # created at startup
 
 SIDECAR_VERSION = "1.1.0"
@@ -199,6 +201,7 @@ def _on_transcript_segment(seg: TranscriptSegment) -> None:
                     gemini_key=_gemini_key_memory,
                     claude_client=_claude_client,
                     gemini_client=_gemini_client,
+                    ollama_client=_ollama_client,
                     segments=segments_snapshot,
                     history=history_snapshot,
                 )
@@ -257,8 +260,9 @@ NULLABLE_PREFS = {"mic_device_index", "loopback_device_index"}  # None = "system
 class PrefsUpdate(BaseModel):
     whisper_model: Literal["base.en", "small.en", "medium.en"] | None = None
     claude_model: str | None = Field(default=None, min_length=1, max_length=100)
-    chat_provider: Literal["claude", "gemini"] | None = None
+    chat_provider: Literal["claude", "gemini", "ollama"] | None = None
     chat_gemini_model: str | None = Field(default=None, min_length=1, max_length=100)
+    chat_ollama_model: str | None = Field(default=None, min_length=1, max_length=100)
     mic_device_index: int | None = Field(default=None, ge=0)
     loopback_device_index: int | None = Field(default=None, ge=0)
     auto_save: bool | None = None
@@ -268,7 +272,7 @@ class PrefsUpdate(BaseModel):
     onboarding_completed: bool | None = None
     auto_answer_enabled: bool | None = None
     auto_answer_prompt: str | None = Field(default=None, max_length=4000)
-    auto_answer_provider: Literal["claude", "gemini"] | None = None
+    auto_answer_provider: Literal["claude", "gemini", "ollama"] | None = None
     auto_answer_model: str | None = Field(default=None, max_length=100)
     chat_panel_visible: bool | None = None
     custom_titlebar: bool | None = None
@@ -374,6 +378,12 @@ def engine_status():
     }
 
 
+@app.get("/api/ollama/models")
+async def ollama_models():
+    """Models installed in the local Ollama; empty when Ollama is not running."""
+    return {"models": await list_ollama_models()}
+
+
 @app.get("/api/gemini/models")
 async def gemini_models():
     """List Gemini models for the picker; falls back to a static set without a key."""
@@ -462,6 +472,14 @@ async def start_session(body: StartSessionBody, request: Request):
         _flush(f"[session] start failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Could not start audio capture: {exc}")
     active_backend, audio_capture = backend, capture
+
+    # Load a local model now so the first question isn't a 30-60s cold start.
+    for provider, model in (
+        (prefs.chat_provider, prefs.chat_ollama_model),
+        (prefs.auto_answer_provider, prefs.auto_answer_model),
+    ):
+        if provider == "ollama":
+            asyncio.ensure_future(warm_up_ollama(model))
 
     if prefs.auto_save:
         try:
@@ -598,7 +616,9 @@ class AskBody(BaseModel):
 @app.post("/api/ask")
 async def ask_ai(body: AskBody, request: Request):
     provider = prefs.chat_provider
-    if provider == "gemini":
+    if provider == "ollama":
+        api_key, client, model = "", _ollama_client, prefs.chat_ollama_model
+    elif provider == "gemini":
         if not _gemini_key_memory:
             raise HTTPException(status_code=401, detail="Missing Gemini API key")
         api_key, client, model = _gemini_key_memory, _gemini_client, prefs.chat_gemini_model

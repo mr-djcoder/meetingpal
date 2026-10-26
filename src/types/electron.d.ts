@@ -41,8 +41,9 @@ interface UserPreferences {
   onboarding_completed: boolean;
   auto_answer_enabled: boolean;
   auto_answer_prompt: string;
-  chat_provider: 'claude' | 'gemini';
+  chat_provider: 'claude' | 'gemini' | 'ollama';
   chat_gemini_model: string;
+  chat_ollama_model: string;
   auto_answer_provider: string;
   auto_answer_model: string;
   chat_panel_visible: boolean;
@@ -102,6 +103,7 @@ interface ElectronAPI {
   setGeminiKey(key: string): Promise<void>;
   hasGeminiKey(): Promise<boolean>;
   getGeminiModels(): Promise<{ models: string[] }>;
+  getOllamaModels(): Promise<{ models: string[] }>;
   setDeepgramKey(key: string): Promise<void>;
   hasDeepgramKey(): Promise<boolean>;
   getEngineStatus(): Promise<EngineStatus>;

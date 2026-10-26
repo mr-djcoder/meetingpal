@@ -68,6 +68,7 @@ class AutoAnswerOrchestrator:
         gemini_key: str | None,
         claude_client: Any,
         gemini_client: Any,
+        ollama_client: Any = None,
         segments: list,
         history: list,
     ) -> None:
@@ -80,7 +81,9 @@ class AutoAnswerOrchestrator:
             return
 
         provider = getattr(prefs, "auto_answer_provider", "claude")
-        if provider == "gemini":
+        if provider == "ollama":
+            client, key = ollama_client, "local"  # no key; the model runs on this machine
+        elif provider == "gemini":
             client, key = gemini_client, gemini_key
         else:
             client, key = claude_client, claude_key

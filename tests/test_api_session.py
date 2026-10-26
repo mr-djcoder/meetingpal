@@ -208,3 +208,32 @@ def test_ask_gemini_without_key_is_401(client, fake_workers, monkeypatch):
     sid = client.post("/api/session/start", json={}).json()["session_id"]
     assert client.post("/api/ask", json={"question": "hi", "session_id": sid}).status_code == 401
     client.post("/api/session/stop")
+
+
+def test_ask_uses_ollama_without_any_key(client, fake_workers, monkeypatch):
+    seen = {}
+
+    async def fake_ollama(**kwargs):
+        seen.update(kwargs)
+        yield {"type": "content_delta", "text": "Local answer."}
+        yield {"type": "message_stop"}
+
+    monkeypatch.setattr(main._ollama_client, "ask", fake_ollama)
+    monkeypatch.setattr(main, "_gemini_key_memory", None)
+    monkeypatch.setattr(main, "_api_key_memory", None)
+    monkeypatch.setattr(main.prefs, "chat_provider", "ollama")
+    monkeypatch.setattr(main.prefs, "chat_ollama_model", "qwen-test")
+    sid = client.post("/api/session/start", json={}).json()["session_id"]
+    r = client.post("/api/ask", json={"question": "hi", "session_id": sid})
+    assert r.status_code == 200
+    assert seen["model"] == "qwen-test"
+    assert main.active_session.chat_messages[-1].content == "Local answer."
+    client.post("/api/session/stop")
+
+
+def test_ollama_models_endpoint(client, monkeypatch):
+    async def fake_list():
+        return ["qwen3.5:27b"]
+
+    monkeypatch.setattr(main, "list_ollama_models", fake_list)
+    assert client.get("/api/ollama/models").json() == {"models": ["qwen3.5:27b"]}

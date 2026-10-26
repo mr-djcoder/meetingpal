@@ -24,8 +24,9 @@ DEFAULT_SAVE_PATH = str(
 @dataclass
 class UserPreferences:
     whisper_model: Literal["base.en", "small.en", "medium.en"] = "base.en"
-    chat_provider: Literal["claude", "gemini"] = "claude"  # who answers the chat panel
+    chat_provider: Literal["claude", "gemini", "ollama"] = "claude"  # who answers the chat panel
     chat_gemini_model: str = "gemini-3.5-flash"
+    chat_ollama_model: str = "qwen3.5:27b"
     claude_model: str = "claude-sonnet-4-6"  # widened — new Claude IDs (haiku-4-5, opus-4-8)
     mic_device_index: int | None = None
     loopback_device_index: int | None = None

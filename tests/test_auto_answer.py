@@ -198,3 +198,22 @@ def test_new_question_after_interval_cancels_previous():
         await orch.task  # second completes
         assert fresh.calls == 1
     run(body())
+
+
+def test_ollama_provider_needs_no_key():
+    events = []
+    async def bc(e): events.append(e)
+
+    async def body():
+        client = FakeClient()
+        orch = make(bc, now_fn=lambda: 100.0)
+        await orch.maybe_answer(
+            segment=Seg("What is your name?"), prefs=Prefs(provider="ollama"),
+            claude_key=None, gemini_key=None, claude_client=None, gemini_client=None,
+            ollama_client=client, segments=[], history=[],
+        )
+        await orch.task
+        return client
+    client = run(body())
+    assert client.calls == 1
+    assert [e["type"] for e in events][-1] == "auto_answer_done"

@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setGeminiKey: (key: string) => ipcRenderer.invoke('set-gemini-key', key),
   hasGeminiKey: () => ipcRenderer.invoke('has-gemini-key'),
   getGeminiModels: () => ipcRenderer.invoke('get-gemini-models'),
+  getOllamaModels: () => ipcRenderer.invoke('get-ollama-models'),
 
   // Deepgram key (cloud transcription)
   setDeepgramKey: (key: string) => ipcRenderer.invoke('set-deepgram-key', key),

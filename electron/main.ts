@@ -274,6 +274,7 @@ ipcMain.handle('has-gemini-key', async () => {
 });
 
 ipcMain.handle('get-gemini-models', () => apiRequest('GET', '/api/gemini/models'));
+ipcMain.handle('get-ollama-models', () => apiRequest('GET', '/api/ollama/models'));
 
 ipcMain.handle('set-deepgram-key', async (_e, key: string) => {
   await keytar.setPassword(KEYTAR_SERVICE, DEEPGRAM_ACCOUNT, key);
