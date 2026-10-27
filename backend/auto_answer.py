@@ -42,7 +42,28 @@ def is_question(text: str) -> bool:
     return any(low.startswith(p) for p in LEAD_PHRASES)
 
 
-BroadcastFn = Callable[[dict], Awaitable[None]]
+ACKNOWLEDGMENTS = {
+    "ok", "okay", "right", "sure", "yes", "yeah", "yep", "no", "nope", "thanks", "thank", "you",
+    "great", "good", "nice", "cool", "perfect", "got", "it", "uh-huh", "mm-hmm", "hmm", "um", "uh",
+    "alright", "awesome", "excellent", "sounds", "that", "makes", "sense", "the", "a", "and", "so",
+    "well", "hi", "hello", "bye", "sorry", "pardon", "please", "go", "ahead", "i", "see",
+    "to", "me", "too", "much", "very", "all", "for", "your", "time", "of", "course", "no", "worries",
+}
+MIN_STATEMENT_WORDS = 4
+
+
+def should_answer(text: str) -> bool:
+    """Answer anything the interviewer says, except bare acknowledgments and fragments."""
+    if is_question(text):
+        return True
+    words = [w.strip(",.!?:;\"'").lower() for w in text.split()]
+    words = [w for w in words if w]
+    if len(words) < MIN_STATEMENT_WORDS:
+        return False
+    return any(w not in ACKNOWLEDGMENTS for w in words)
+
+
+BroadcastFn =Callable[[dict], Awaitable[None]]
 
 
 class AutoAnswerOrchestrator:
@@ -85,7 +106,7 @@ class AutoAnswerOrchestrator:
     ) -> None:
         if not getattr(prefs, "auto_answer_enabled", False):
             return
-        if not (segment.is_final and segment.speaker == "Them" and is_question(segment.text)):
+        if not (segment.is_final and segment.speaker == "Them" and should_answer(segment.text)):
             return
         now = self._now()
         if now - self._last_fire < self._min_interval_s:

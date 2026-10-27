@@ -17,6 +17,16 @@ def test_is_question_positive():
     assert is_question("So, how do you handle conflict")
 
 
+def test_should_answer_statements():
+    from backend.auto_answer import should_answer
+    assert should_answer("I'd like to hear about a project that went badly.")
+    assert should_answer("We have a tight deadline and a legacy codebase.")
+    assert not should_answer("Okay, sounds good.")
+    assert not should_answer("Thanks, that makes sense.")
+    assert not should_answer("Right.")
+    assert not should_answer("")
+
+
 def test_is_question_negative():
     assert not is_question("I think we should ship it.")
     assert not is_question("")
