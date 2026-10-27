@@ -12,6 +12,9 @@ def test_is_question_positive():
     assert is_question("Tell me about yourself")
     assert is_question("Is that correct?")
     assert is_question("Walk me through your approach.")
+    assert is_question("Describe your approach to technical debt, how do you convince stakeholders.")
+    assert is_question("Okay, so describe a time you disagreed with your manager.")
+    assert is_question("So, how do you handle conflict")
 
 
 def test_is_question_negative():

@@ -14,7 +14,13 @@ INTERROGATIVES = {
     "can", "could", "would", "should", "do", "does", "did",
     "is", "are", "was", "were", "will",
 }
-LEAD_PHRASES = ("tell me", "explain", "walk me through")
+# Interview prompts are often imperatives ("Describe your approach to...").
+LEAD_PHRASES = (
+    "tell me", "tell us", "explain", "walk me through", "walk us through",
+    "describe", "give me", "give us", "share", "talk me through", "talk about",
+    "talk to me about", "take me through", "elaborate", "discuss",
+)
+FILLER_WORDS = {"so", "ok", "okay", "and", "well", "alright", "great", "right", "now", "next", "um", "uh"}
 
 
 def is_question(text: str) -> bool:
@@ -24,10 +30,15 @@ def is_question(text: str) -> bool:
         return False
     if t.endswith("?"):
         return True
-    low = t.lower()
-    words = low.split()
-    if words and words[0].strip(",.!:;") in INTERROGATIVES:
+    words = t.lower().split()
+    # Skip spoken filler at the start ("So, describe...", "Okay, how do you...").
+    while words and words[0].strip(",.!:;") in FILLER_WORDS:
+        words.pop(0)
+    if not words:
+        return False
+    if words[0].strip(",.!:;") in INTERROGATIVES:
         return True
+    low = " ".join(words)
     return any(low.startswith(p) for p in LEAD_PHRASES)
 
 
