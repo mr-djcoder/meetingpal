@@ -9,7 +9,12 @@ const noDragStyle: CSSProperties = { WebkitAppRegion: 'no-drag' } as CSSProperti
  * Draggable; provides minimize / maximize / close. The window stays resizable
  * from its edges natively.
  */
-export function CustomTitleBar() {
+interface Props {
+  /** Hide the maximize button (compact mode keeps a fixed size). */
+  hideMaximize?: boolean;
+}
+
+export function CustomTitleBar({ hideMaximize = false }: Props) {
   const api = window.electronAPI;
   return (
     <div
@@ -32,15 +37,17 @@ export function CustomTitleBar() {
             <rect x="2" y="5.5" width="8" height="1" fill="currentColor" />
           </svg>
         </button>
-        <button
-          onClick={() => api.windowMaximize()}
-          title="Maximize"
-          className="w-11 h-8 flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-white transition-colors"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor">
-            <rect x="2.5" y="2.5" width="7" height="7" strokeWidth="1" />
-          </svg>
-        </button>
+        {!hideMaximize && (
+          <button
+            onClick={() => api.windowMaximize()}
+            title="Maximize"
+            className="w-11 h-8 flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-white transition-colors"
+          >
+            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor">
+              <rect x="2.5" y="2.5" width="7" height="7" strokeWidth="1" />
+            </svg>
+          </button>
+        )}
         <button
           onClick={() => api.windowClose()}
           title="Close"

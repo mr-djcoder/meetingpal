@@ -11,6 +11,8 @@ interface Props {
   onToggleAutoAnswer: () => void;
   suggestedVisible: boolean;
   onToggleSuggested: () => void;
+  compact: boolean;
+  onToggleCompact: () => void;
   customTitlebar: boolean;
 }
 
@@ -30,6 +32,8 @@ export function TopBar({
   onToggleAutoAnswer,
   suggestedVisible,
   onToggleSuggested,
+  compact,
+  onToggleCompact,
   customTitlebar,
 }: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
@@ -159,6 +163,19 @@ export function TopBar({
 
       {/* Right controls */}
       <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Compact mode: fixed 400x800 window, maximize disabled */}
+        <button
+          onClick={onToggleCompact}
+          title={compact ? 'Leave compact mode' : 'Compact mode (400 x 800, no maximize)'}
+          className={`p-1.5 rounded transition-colors ${
+            compact ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'
+          }`}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+          </svg>
+        </button>
+
         {/* Always-on-top pin */}
         <button
           onClick={togglePin}

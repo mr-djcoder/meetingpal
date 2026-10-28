@@ -22,6 +22,7 @@ function MainLayout() {
   const [autoAnswerOn, setAutoAnswerOn] = useState(false);
   const [chatVisible, setChatVisible] = useState(true);
   const [suggestedVisible, setSuggestedVisible] = useState(true);
+  const [compact, setCompact] = useState(false);
   const [transcriptVisible, setTranscriptVisible] = useState(true);
   // Separate from transcriptVisible: only hides the header bar (Transcript + Copy/Export),
   // not the transcript content.
@@ -96,6 +97,12 @@ function MainLayout() {
     window.electronAPI.setPreferences({ suggested_answer_visible: next });
   };
 
+  const toggleCompact = () => {
+    const next = !compact;
+    setCompact(next);
+    window.electronAPI.setCompact(next);
+  };
+
   const toggleAutoAnswer = () => {
     const next = !autoAnswerOn;
     setAutoAnswerOn(next);
@@ -122,7 +129,7 @@ function MainLayout() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-gray-100 overflow-hidden">
-      {customTitlebar && <CustomTitleBar />}
+      {customTitlebar && <CustomTitleBar hideMaximize={compact} />}
       <TopBar
         onSettingsOpen={() => setSettingsOpen(true)}
         chatVisible={chatVisible}
@@ -133,6 +140,8 @@ function MainLayout() {
         onToggleAutoAnswer={toggleAutoAnswer}
         suggestedVisible={suggestedVisible}
         onToggleSuggested={toggleSuggested}
+        compact={compact}
+        onToggleCompact={toggleCompact}
         customTitlebar={customTitlebar}
       />
 

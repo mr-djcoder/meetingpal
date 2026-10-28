@@ -126,6 +126,8 @@ interface ElectronAPI {
   setWindowWidth(width: number): Promise<void>;
   setOpacity(value: number): Promise<number>;
   setAlwaysOnTop(value: boolean): Promise<boolean>;
+  /** Shrink to the minimum compact strip, or restore the previous size. */
+  setCompact(on: boolean): Promise<void>;
   copyTranscript(sessionId: string): Promise<void>;
   exportTranscript(sessionId: string, format: 'txt' | 'md'): Promise<string | null>;
   /** Open a folder inside the saved recordings directory in Explorer. Resolves to '' or an error message. */

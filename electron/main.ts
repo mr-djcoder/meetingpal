@@ -364,7 +364,7 @@ ipcMain.handle('open-folder', async (_e, folderPath: string) => {
 // Custom title bar window controls
 ipcMain.handle('window-minimize', () => mainWindow?.minimize());
 ipcMain.handle('window-maximize', () => {
-  if (!mainWindow) return;
+  if (!mainWindow || !mainWindow.isMaximizable()) return;
   if (mainWindow.isMaximized()) mainWindow.unmaximize();
   else mainWindow.maximize();
 });
@@ -374,6 +374,25 @@ ipcMain.handle('set-window-width', (_e, width: number) => {
   if (!mainWindow) return;
   const [, h] = mainWindow.getSize();
   mainWindow.setSize(Math.max(200, Math.round(Number(width))), h);
+});
+
+// Compact mode: a fixed 400x800 window with maximize disabled. The previous bounds
+// are remembered so leaving compact mode puts the window back where it was.
+const COMPACT_SIZE = { width: 400, height: 800 };
+let normalBounds: Electron.Rectangle | null = null;
+
+ipcMain.handle('set-compact', (_e, on: boolean) => {
+  if (!mainWindow) return;
+  if (on) {
+    if (!normalBounds) normalBounds = mainWindow.getBounds();
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    mainWindow.setMaximizable(false);
+    mainWindow.setSize(COMPACT_SIZE.width, COMPACT_SIZE.height);
+  } else {
+    mainWindow.setMaximizable(true);
+    if (normalBounds) mainWindow.setBounds(normalBounds);
+    normalBounds = null;
+  }
 });
 
 ipcMain.handle('set-opacity', (_e, value: number) => {

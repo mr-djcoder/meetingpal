@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   applyTitlebar: (custom: boolean) => ipcRenderer.invoke('apply-titlebar', custom),
   setWindowWidth: (width: number) => ipcRenderer.invoke('set-window-width', width),
   setOpacity: (value: number) => ipcRenderer.invoke('set-opacity', value),
+  setCompact: (on: boolean) => ipcRenderer.invoke('set-compact', on),
   setAlwaysOnTop: (value: boolean) => ipcRenderer.invoke('set-always-on-top', value),
 
   // Export
