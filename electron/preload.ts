@@ -7,8 +7,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopSession: () => ipcRenderer.invoke('stop-session'),
 
   // AI Q&A
-  askQuestion: (question: string, model?: string) =>
-    ipcRenderer.invoke('ask-question', { question, model }),
+  clearChat: (sessionId: string) => ipcRenderer.invoke('clear-chat', sessionId),
+  askQuestion: (question: string, sessionId: string, model?: string) =>
+    ipcRenderer.invoke('ask-question', { question, sessionId, model }),
 
   // Preferences
   getPreferences: () => ipcRenderer.invoke('get-preferences'),
@@ -22,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setGeminiKey: (key: string) => ipcRenderer.invoke('set-gemini-key', key),
   hasGeminiKey: () => ipcRenderer.invoke('has-gemini-key'),
   getGeminiModels: () => ipcRenderer.invoke('get-gemini-models'),
+  getOllamaModels: () => ipcRenderer.invoke('get-ollama-models'),
 
   // Deepgram key (cloud transcription)
   setDeepgramKey: (key: string) => ipcRenderer.invoke('set-deepgram-key', key),
@@ -35,6 +37,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_: Electron.IpcRendererEvent, segment: unknown) => cb(segment);
     ipcRenderer.on('transcript-segment', handler);
     return () => ipcRenderer.removeListener('transcript-segment', handler);
+  },
+  onTranscriptRemove: (cb: (msg: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, msg: unknown) => cb(msg);
+    ipcRenderer.on('transcript-remove', handler);
+    return () => ipcRenderer.removeListener('transcript-remove', handler);
   },
   onAudioLevel: (cb: (frame: unknown) => void) => {
     const handler = (_: Electron.IpcRendererEvent, frame: unknown) => cb(frame);
@@ -82,11 +89,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),
   windowClose: () => ipcRenderer.invoke('window-close'),
   applyTitlebar: (custom: boolean) => ipcRenderer.invoke('apply-titlebar', custom),
+  setWindowWidth: (width: number) => ipcRenderer.invoke('set-window-width', width),
   setOpacity: (value: number) => ipcRenderer.invoke('set-opacity', value),
+  setCompact: (on: boolean) => ipcRenderer.invoke('set-compact', on),
   setAlwaysOnTop: (value: boolean) => ipcRenderer.invoke('set-always-on-top', value),
 
   // Export
   copyTranscript: (sessionId: string) => ipcRenderer.invoke('copy-transcript', sessionId),
   exportTranscript: (sessionId: string, format: string) =>
     ipcRenderer.invoke('export-transcript', { sessionId, format }),
+  openFolder: (folderPath: string) => ipcRenderer.invoke('open-folder', folderPath),
 });

@@ -6,6 +6,7 @@ import { SuggestedAnswerPanel } from './components/SuggestedAnswerPanel';
 import { TopBar } from './components/TopBar';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { useWebSocket } from './hooks/useWebSocket';
+import { useAutoAnswerStore } from './store/autoAnswerStore';
 import { OnboardingWizard } from './onboarding/OnboardingWizard';
 
 interface SidecarError {
@@ -15,24 +16,25 @@ interface SidecarError {
   recoverable: boolean;
 }
 
-interface ModelDownloadProgress {
-  type: 'model_download_progress';
-  percent: number;
-}
-
 function MainLayout() {
   useWebSocket(); // sets up transcript + auto-answer IPC subscriptions
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoAnswerOn, setAutoAnswerOn] = useState(false);
   const [chatVisible, setChatVisible] = useState(true);
-  const [transcriptVisible, setTranscriptVisible] = useState(false);
+  const [suggestedVisible, setSuggestedVisible] = useState(true);
+  const [compact, setCompact] = useState(false);
+  const compactApplied = useRef(false); // the saved mode is applied once, not on every settings close
+  const [transcriptVisible, setTranscriptVisible] = useState(true);
+  // Separate from transcriptVisible: only hides the header bar (Transcript + Copy/Export),
+  // not the transcript content.
+  const [transcriptBarVisible, setTranscriptBarVisible] = useState(true);
   const [customTitlebar, setCustomTitlebar] = useState(false);
   const [splitPct, setSplitPct] = useState(60);
   const [opacityPct, setOpacityPct] = useState(100);
   const panelsRef = useRef<HTMLDivElement>(null);
+  const splitRef = useRef(60); // latest divider position, readable from drag handlers
   const [errorBanner, setErrorBanner] = useState<SidecarError | null>(null);
   const [errorModal, setErrorModal] = useState<SidecarError | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
 
   useEffect(() => {
     const offError = window.electronAPI.onError((err) => {
@@ -45,47 +47,34 @@ function MainLayout() {
       }
     });
 
-    // Model download progress
-    const offProgress = (window as unknown as { electronAPI: { onModelDownloadProgress?: (cb: (p: unknown) => void) => () => void } }).electronAPI.onModelDownloadProgress;
-    let offDl: (() => void) | undefined;
-    if (offProgress) {
-      offDl = offProgress((p) => {
-        const progress = p as ModelDownloadProgress;
-        setDownloadProgress(progress.percent);
-        if (progress.percent >= 1) {
-          setTimeout(() => setDownloadProgress(null), 1000);
-        }
-      });
-    }
-
     return () => {
       offError();
-      offDl?.();
     };
   }, []);
 
   // Theme / font-size reactivity from preferences
   useEffect(() => {
-    window.electronAPI.getPreferences().then((prefs) => {
-      const p = prefs as { theme: string; font_size: number };
+    window.electronAPI.getPreferences().then((p) => {
       document.documentElement.classList.toggle('dark', p.theme === 'dark');
       document.documentElement.classList.toggle('light', p.theme === 'light');
       document.documentElement.style.setProperty('--transcript-font-size', `${p.font_size}px`);
-      const aa = prefs as unknown as {
-        auto_answer_enabled?: boolean;
-        chat_panel_visible?: boolean;
-        custom_titlebar?: boolean;
-        window_opacity?: number;
-        transcript_split?: number;
-        transcript_visible?: boolean;
-      };
-      setAutoAnswerOn(Boolean(aa.auto_answer_enabled));
-      setChatVisible(aa.chat_panel_visible ?? true);
-      setTranscriptVisible(Boolean(aa.transcript_visible));
-      setCustomTitlebar(Boolean(aa.custom_titlebar));
-      setSplitPct(aa.transcript_split ?? 60);
-      setOpacityPct(Math.round((aa.window_opacity ?? 1) * 100));
-      window.electronAPI.setOpacity(aa.window_opacity ?? 1);
+      setAutoAnswerOn(Boolean(p.auto_answer_enabled));
+      const showBox = p.suggested_answer_visible !== false;
+      setSuggestedVisible(showBox);
+      useAutoAnswerStore.getState().setPanelVisible(showBox);
+      if (!compactApplied.current) {
+        compactApplied.current = true;
+        const startCompact = p.compact_mode !== false;
+        setCompact(startCompact);
+        if (startCompact) window.electronAPI.setCompact(true);
+      }
+      setChatVisible(p.chat_panel_visible ?? true);
+      setTranscriptVisible(p.transcript_visible !== false);
+      setCustomTitlebar(Boolean(p.custom_titlebar));
+      splitRef.current = p.transcript_split ?? 60;
+      setSplitPct(splitRef.current);
+      setOpacityPct(Math.round((p.window_opacity ?? 1) * 100));
+      window.electronAPI.setOpacity(p.window_opacity ?? 1);
     });
   }, [settingsOpen]); // re-apply after settings close
 
@@ -93,19 +82,39 @@ function MainLayout() {
     setOpacityPct(pct);
     const frac = pct / 100;
     window.electronAPI.setOpacity(frac);
-    window.electronAPI.setPreferences({ window_opacity: frac } as never);
+    window.electronAPI.setPreferences({ window_opacity: frac });
   };
 
   const toggleChat = () => {
     const next = !chatVisible;
     setChatVisible(next);
-    window.electronAPI.setPreferences({ chat_panel_visible: next } as never);
+    window.electronAPI.setPreferences({ chat_panel_visible: next });
+    // Make room when the AI panel opens; closing it leaves the user's width alone.
+    if (next) window.electronAPI.setWindowWidth(750);
   };
 
-  const toggleTranscript = () => {
-    const next = !transcriptVisible;
-    setTranscriptVisible(next);
-    window.electronAPI.setPreferences({ transcript_visible: next } as never);
+  const toggleTranscriptBar = () => {
+    setTranscriptBarVisible((v) => !v);
+  };
+
+  const toggleSuggested = () => {
+    const next = !suggestedVisible;
+    setSuggestedVisible(next);
+    useAutoAnswerStore.getState().setPanelVisible(next);
+    window.electronAPI.setPreferences({ suggested_answer_visible: next });
+  };
+
+  const toggleCompact = () => {
+    const next = !compact;
+    setCompact(next);
+    window.electronAPI.setCompact(next);
+    window.electronAPI.setPreferences({ compact_mode: next });
+  };
+
+  const toggleAutoAnswer = () => {
+    const next = !autoAnswerOn;
+    setAutoAnswerOn(next);
+    window.electronAPI.setPreferences({ auto_answer_enabled: next });
   };
 
   const startDividerDrag = (e: React.MouseEvent) => {
@@ -114,15 +123,13 @@ function MainLayout() {
       const rect = panelsRef.current?.getBoundingClientRect();
       if (!rect || rect.width === 0) return;
       const pct = ((ev.clientX - rect.left) / rect.width) * 100;
-      setSplitPct(Math.min(80, Math.max(20, pct)));
+      splitRef.current = Math.min(80, Math.max(20, pct));
+      setSplitPct(splitRef.current);
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      setSplitPct((p) => {
-        window.electronAPI.setPreferences({ transcript_split: p } as never);
-        return p;
-      });
+      window.electronAPI.setPreferences({ transcript_split: splitRef.current });
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -130,13 +137,19 @@ function MainLayout() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-gray-100 overflow-hidden">
-      {customTitlebar && <CustomTitleBar />}
+      {customTitlebar && <CustomTitleBar hideMaximize={compact} />}
       <TopBar
         onSettingsOpen={() => setSettingsOpen(true)}
         chatVisible={chatVisible}
         onToggleChat={toggleChat}
-        transcriptVisible={transcriptVisible}
-        onToggleTranscript={toggleTranscript}
+        transcriptBarVisible={transcriptBarVisible}
+        onToggleTranscriptBar={toggleTranscriptBar}
+        autoAnswerOn={autoAnswerOn}
+        onToggleAutoAnswer={toggleAutoAnswer}
+        suggestedVisible={suggestedVisible}
+        onToggleSuggested={toggleSuggested}
+        compact={compact}
+        onToggleCompact={toggleCompact}
         customTitlebar={customTitlebar}
       />
 
@@ -164,21 +177,6 @@ function MainLayout() {
         </div>
       )}
 
-      {/* Model download progress */}
-      {downloadProgress !== null && (
-        <div className="bg-blue-900/80 text-blue-200 text-sm px-4 py-2">
-          <div className="flex items-center gap-3">
-            <span>Downloading Whisper model… {Math.round(downloadProgress * 100)}%</span>
-            <div className="flex-1 h-1.5 bg-blue-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-blue-400 rounded-full transition-all"
-                style={{ width: `${downloadProgress * 100}%` }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Main panels — draggable split; each panel independently toggleable */}
       <div ref={panelsRef} className="flex-1 flex overflow-hidden">
         {transcriptVisible && (
@@ -186,7 +184,7 @@ function MainLayout() {
             className="h-full overflow-hidden"
             style={{ width: chatVisible ? `${splitPct}%` : '100%' }}
           >
-            <TranscriptPanel />
+            <TranscriptPanel headerVisible={transcriptBarVisible} />
           </div>
         )}
         {transcriptVisible && chatVisible && (
@@ -204,7 +202,7 @@ function MainLayout() {
       </div>
 
       {/* Auto-answer suggested-answer band */}
-      {autoAnswerOn && <SuggestedAnswerPanel />}
+      {autoAnswerOn && suggestedVisible && <SuggestedAnswerPanel />}
 
       {/* Settings modal */}
       <Settings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
@@ -233,12 +231,21 @@ export default function App() {
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
 
   useEffect(() => {
+    // hasApiKey() reads from Windows Credential Manager (always available).
+    // getPreferences() requires the sidecar; if it's still starting up or
+    // crashed, don't show the onboarding wizard — just trust the API key.
     Promise.all([
       window.electronAPI.hasApiKey(),
-      window.electronAPI.getPreferences(),
+      window.electronAPI.getPreferences().catch(() => null),
     ]).then(([hasKey, prefs]) => {
-      const p = prefs as { onboarding_completed: boolean };
-      setOnboardingDone(hasKey && p.onboarding_completed);
+      if (prefs === null) {
+        // Sidecar not yet ready — if the key exists, assume onboarding is done
+        // so the main layout mounts and retries preferences on its own.
+        setOnboardingDone(Boolean(hasKey));
+      } else {
+        const p = prefs as { onboarding_completed: boolean };
+        setOnboardingDone(Boolean(hasKey) && p.onboarding_completed);
+      }
     }).catch(() => setOnboardingDone(false));
   }, []);
 

@@ -31,15 +31,47 @@ class DeepgramStreamMapper:
         self._emit = emit
         self._started_at = started_at or datetime.now()
         self._current_id: str | None = None
+        self._committed: list[str] = []  # is_final chunks of the utterance in progress
 
     def handle(self, result: dict) -> None:
+        """Deepgram `is_final` marks a *chunk* as stable, not the utterance as complete.
+        An utterance ends on `speech_final` (endpoint) or an UtteranceEnd event, so we
+        accumulate stable chunks and only emit a final segment at the endpoint. This
+        keeps half-sentences from being treated as finished questions."""
+        if result.get("type") == "UtteranceEnd":
+            self._finalize_pending()
+            return
         alts = result.get("channel", {}).get("alternatives", [{}])
         text = (alts[0].get("transcript") or "").strip()
+        speech_final = bool(result.get("speech_final"))
         if not text:
+            if speech_final:
+                self._finalize_pending()
             return
+        if result.get("is_final"):
+            self._committed.append(text)
+            self._emit_text(" ".join(self._committed), is_final=speech_final)
+            if speech_final:
+                self._reset()
+        else:
+            self._emit_text(" ".join(self._committed + [text]), is_final=False)
+
+    def _finalize_pending(self) -> None:
+        if self._committed:
+            self._emit_text(" ".join(self._committed), is_final=True)
+        self._reset()
+
+    def flush(self) -> None:
+        """Finalize whatever is pending (called when the session stops)."""
+        self._finalize_pending()
+
+    def _reset(self) -> None:
+        self._committed = []
+        self._current_id = None
+
+    def _emit_text(self, text: str, is_final: bool) -> None:
         if self._current_id is None:
             self._current_id = str(uuid.uuid4())
-        is_final = bool(result.get("is_final"))
         now = datetime.now()
         seg = TranscriptSegment(
             id=self._current_id,
@@ -53,8 +85,6 @@ class DeepgramStreamMapper:
             confidence=1.0,
         )
         self._emit(seg)
-        if is_final:
-            self._current_id = None  # next result starts a new utterance
 
 
 import asyncio
@@ -66,6 +96,8 @@ MAX_QUEUED_FRAMES = 50  # ~25s at 0.5s frames; drop oldest beyond this (backpres
 
 
 class DeepgramBackend:
+    RECONNECT_DELAYS_S = (1.0, 2.0, 4.0)  # per attempt after an unexpected close
+
     def __init__(self, api_key, session_id, emit, on_error,
                  conn_factory=None, started_at=None):
         self._api_key = api_key
@@ -79,6 +111,8 @@ class DeepgramBackend:
         self._conns: dict[str, object] = {}
         self._queues: dict[str, deque] = {"mic": deque(), "loopback": deque()}
         self._mappers: dict[str, DeepgramStreamMapper] = {}
+        self._stopping = False
+        self._reconnecting: set[str] = set()
 
     def _run_loop(self):
         asyncio.set_event_loop(self._loop)
@@ -99,12 +133,45 @@ class DeepgramBackend:
             self._on_error("Cloud transcription unavailable — switch to Local in Settings "
                            "or check your connection / Deepgram key.")
 
-    async def _open(self, source: str):
+    def _handlers(self, source: str):
         def on_message(result: dict):
             self._mappers[source].handle(result)
         def on_error(err):
             self._on_error(f"Cloud transcription error ({source}): {err}")
+        return on_message, on_error
+
+    async def _open(self, source: str):
+        on_message, on_error = self._handlers(source)
         return self._conn_factory(source, on_message, on_error)
+
+    def _on_closed(self, source: str) -> None:
+        """Connection dropped unexpectedly (called from the SDK's thread)."""
+        if self._stopping or source in self._reconnecting or not self._thread.is_alive():
+            return
+        self._reconnecting.add(source)
+        self._conns.pop(source, None)  # feed() drops audio for this source until back
+        asyncio.run_coroutine_threadsafe(self._reconnect(source), self._loop)
+
+    async def _reconnect(self, source: str) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            for delay in self.RECONNECT_DELAYS_S:
+                if self._stopping:
+                    return
+                await asyncio.sleep(delay)
+                try:
+                    on_message, on_error = self._handlers(source)
+                    conn = await loop.run_in_executor(
+                        None, self._conn_factory, source, on_message, on_error)
+                except Exception:
+                    continue
+                self._conns[source] = conn
+                self._on_error(f"Cloud transcription reconnected ({source}).")
+                return
+            self._on_error(f"Cloud transcription lost the {source} connection and could not "
+                           "reconnect. Stop and start the recording, or switch to Local.")
+        finally:
+            self._reconnecting.discard(source)
 
     def feed(self, source: str, frame: np.ndarray, rms: float) -> None:
         conn = self._conns.get(source)
@@ -132,6 +199,13 @@ class DeepgramBackend:
                 return
 
     def stop(self) -> None:
+        self._stopping = True
+        for mapper in self._mappers.values():
+            try:
+                mapper.flush()  # emit any utterance still in progress as final
+            except Exception:
+                pass
+
         async def _close():
             for c in self._conns.values():
                 try:
@@ -169,9 +243,13 @@ class DeepgramBackend:
                 lambda _s, result, **kw: on_message(result.to_dict()))
         conn.on(LiveTranscriptionEvents.Error,
                 lambda _s, error, **kw: on_error(error))
+        conn.on(LiveTranscriptionEvents.UtteranceEnd,
+                lambda _s, result, **kw: on_message(result.to_dict()))
+        conn.on(LiveTranscriptionEvents.Close,
+                lambda _s, *a, **kw: self._on_closed(source))
         conn.start(LiveOptions(
             model="nova-2", language="en-US", encoding="linear16",
             sample_rate=16000, channels=1, interim_results=True,
-            endpointing=300, diarize=False,
+            endpointing=300, utterance_end_ms="1000", diarize=False,
         ))
         return conn

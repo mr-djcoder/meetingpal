@@ -14,7 +14,13 @@ INTERROGATIVES = {
     "can", "could", "would", "should", "do", "does", "did",
     "is", "are", "was", "were", "will",
 }
-LEAD_PHRASES = ("tell me", "explain", "walk me through")
+# Interview prompts are often imperatives ("Describe your approach to...").
+LEAD_PHRASES = (
+    "tell me", "tell us", "explain", "walk me through", "walk us through",
+    "describe", "give me", "give us", "share", "talk me through", "talk about",
+    "talk to me about", "take me through", "elaborate", "discuss",
+)
+FILLER_WORDS = {"so", "ok", "okay", "and", "well", "alright", "great", "right", "now", "next", "um", "uh"}
 
 
 def is_question(text: str) -> bool:
@@ -24,14 +30,40 @@ def is_question(text: str) -> bool:
         return False
     if t.endswith("?"):
         return True
-    low = t.lower()
-    words = low.split()
-    if words and words[0].strip(",.!:;") in INTERROGATIVES:
+    words = t.lower().split()
+    # Skip spoken filler at the start ("So, describe...", "Okay, how do you...").
+    while words and words[0].strip(",.!:;") in FILLER_WORDS:
+        words.pop(0)
+    if not words:
+        return False
+    if words[0].strip(",.!:;") in INTERROGATIVES:
         return True
+    low = " ".join(words)
     return any(low.startswith(p) for p in LEAD_PHRASES)
 
 
-BroadcastFn = Callable[[dict], Awaitable[None]]
+ACKNOWLEDGMENTS = {
+    "ok", "okay", "right", "sure", "yes", "yeah", "yep", "no", "nope", "thanks", "thank", "you",
+    "great", "good", "nice", "cool", "perfect", "got", "it", "uh-huh", "mm-hmm", "hmm", "um", "uh",
+    "alright", "awesome", "excellent", "sounds", "that", "makes", "sense", "the", "a", "and", "so",
+    "well", "hi", "hello", "bye", "sorry", "pardon", "please", "go", "ahead", "i", "see",
+    "to", "me", "too", "much", "very", "all", "for", "your", "time", "of", "course", "no", "worries",
+}
+MIN_STATEMENT_WORDS = 4
+
+
+def should_answer(text: str) -> bool:
+    """Answer anything the interviewer says, except bare acknowledgments and fragments."""
+    if is_question(text):
+        return True
+    words = [w.strip(",.!?:;\"'").lower() for w in text.split()]
+    words = [w for w in words if w]
+    if len(words) < MIN_STATEMENT_WORDS:
+        return False
+    return any(w not in ACKNOWLEDGMENTS for w in words)
+
+
+BroadcastFn =Callable[[dict], Awaitable[None]]
 
 
 class AutoAnswerOrchestrator:
@@ -68,19 +100,22 @@ class AutoAnswerOrchestrator:
         gemini_key: str | None,
         claude_client: Any,
         gemini_client: Any,
+        ollama_client: Any = None,
         segments: list,
         history: list,
     ) -> None:
         if not getattr(prefs, "auto_answer_enabled", False):
             return
-        if not (segment.is_final and segment.speaker == "Them" and is_question(segment.text)):
+        if not (segment.is_final and segment.speaker == "Them" and should_answer(segment.text)):
             return
         now = self._now()
         if now - self._last_fire < self._min_interval_s:
             return
 
         provider = getattr(prefs, "auto_answer_provider", "claude")
-        if provider == "gemini":
+        if provider == "ollama":
+            client, key = ollama_client, "local"  # no key; the model runs on this machine
+        elif provider == "gemini":
             client, key = gemini_client, gemini_key
         else:
             client, key = claude_client, claude_key

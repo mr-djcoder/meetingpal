@@ -5,8 +5,14 @@ interface Props {
   onSettingsOpen: () => void;
   chatVisible: boolean;
   onToggleChat: () => void;
-  transcriptVisible: boolean;
-  onToggleTranscript: () => void;
+  transcriptBarVisible: boolean;
+  onToggleTranscriptBar: () => void;
+  autoAnswerOn: boolean;
+  onToggleAutoAnswer: () => void;
+  suggestedVisible: boolean;
+  onToggleSuggested: () => void;
+  compact: boolean;
+  onToggleCompact: () => void;
   customTitlebar: boolean;
 }
 
@@ -20,12 +26,17 @@ export function TopBar({
   onSettingsOpen,
   chatVisible,
   onToggleChat,
-  transcriptVisible,
-  onToggleTranscript,
+  transcriptBarVisible,
+  onToggleTranscriptBar,
+  autoAnswerOn,
+  onToggleAutoAnswer,
+  suggestedVisible,
+  onToggleSuggested,
+  compact,
+  onToggleCompact,
   customTitlebar,
 }: Props) {
   const { isRecording, duration, startRecording, stopRecording } = useRecording();
-  const [autoAnswer, setAutoAnswer] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [recError, setRecError] = useState<string | null>(null);
@@ -53,9 +64,7 @@ export function TopBar({
     window.electronAPI
       .getPreferences()
       .then((p) => {
-        const prefs = p as unknown as { auto_answer_enabled?: boolean; always_on_top?: boolean };
-        setAutoAnswer(Boolean(prefs.auto_answer_enabled));
-        const top = Boolean(prefs.always_on_top);
+        const top = Boolean(p.always_on_top);
         setPinned(top);
         window.electronAPI.setAlwaysOnTop(top); // restore OS window state
       })
@@ -70,17 +79,11 @@ export function TopBar({
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const toggleAutoAnswer = async () => {
-    const next = !autoAnswer;
-    setAutoAnswer(next);
-    await window.electronAPI.setPreferences({ auto_answer_enabled: next } as never);
-  };
-
   const togglePin = async () => {
     const next = !pinned;
     setPinned(next);
     await window.electronAPI.setAlwaysOnTop(next);
-    await window.electronAPI.setPreferences({ always_on_top: next } as never);
+    await window.electronAPI.setPreferences({ always_on_top: next });
   };
 
   const handleToggle = async () => {
@@ -158,7 +161,7 @@ export function TopBar({
         )}
       </div>
 
-      {/* Right controls */}
+      {/* Right controls: pin and answer box (usually off) first, then auto-answer, compact, transcript and chat (usually on) */}
       <div className="flex items-center gap-2 flex-shrink-0">
         {/* Always-on-top pin */}
         <button
@@ -173,14 +176,33 @@ export function TopBar({
           </svg>
         </button>
 
-        {/* Auto-answer toggle */}
+        {/* Show or hide the Suggested Answer box (answers are not written to it while hidden) */}
         <button
-          onClick={toggleAutoAnswer}
-          title={autoAnswer ? 'Auto-answer ON' : 'Auto-answer OFF'}
+          onClick={onToggleSuggested}
+          title={suggestedVisible ? 'Hide suggested answer box' : 'Show suggested answer box'}
           className={
             narrow
-              ? `p-1.5 rounded transition-colors ${autoAnswer ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
-              : `text-xs px-2 py-1 rounded font-medium transition-colors ${autoAnswer ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              ? `p-1.5 rounded transition-colors ${suggestedVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              : `text-xs px-2 py-1 rounded font-medium transition-colors ${suggestedVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+          }
+        >
+          {narrow ? (
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5h16v14H4zM4 14h16" />
+            </svg>
+          ) : (
+            'Answer box'
+          )}
+        </button>
+
+        {/* Auto-answer toggle */}
+        <button
+          onClick={onToggleAutoAnswer}
+          title={autoAnswerOn ? 'Auto-answer ON' : 'Auto-answer OFF'}
+          className={
+            narrow
+              ? `p-1.5 rounded transition-colors ${autoAnswerOn ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              : `text-xs px-2 py-1 rounded font-medium transition-colors ${autoAnswerOn ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
           }
         >
           {narrow ? (
@@ -192,14 +214,27 @@ export function TopBar({
           )}
         </button>
 
-        {/* Toggle transcript */}
+        {/* Compact mode: fixed 400x800 window, maximize disabled */}
         <button
-          onClick={onToggleTranscript}
-          title={transcriptVisible ? 'Hide transcript' : 'Show transcript'}
+          onClick={onToggleCompact}
+          title={compact ? 'Leave compact mode' : 'Compact mode (400 x 800, no maximize)'}
+          className={`p-1.5 rounded transition-colors ${
+            compact ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'
+          }`}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+          </svg>
+        </button>
+
+        {/* Toggle transcript header bar (Transcript label + Copy/Export) */}
+        <button
+          onClick={onToggleTranscriptBar}
+          title={transcriptBarVisible ? 'Hide transcript bar' : 'Show transcript bar'}
           className={
             narrow
-              ? `p-1.5 rounded transition-colors ${transcriptVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
-              : `text-xs px-2 py-1 rounded font-medium transition-colors ${transcriptVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              ? `p-1.5 rounded transition-colors ${transcriptBarVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              : `text-xs px-2 py-1 rounded font-medium transition-colors ${transcriptBarVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
           }
         >
           {narrow ? (

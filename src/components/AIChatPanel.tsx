@@ -11,7 +11,7 @@ const SUGGESTED_PROMPTS = [
 ];
 
 export function AIChatPanel() {
-  const { messages, isStreaming, streamingContent, addUserMessage } = useChatStore();
+  const { messages, isStreaming, streamingContent, addUserMessage, clearHistory } = useChatStore();
   const { sessionId } = useTranscriptStore();
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -29,10 +29,18 @@ export function AIChatPanel() {
     setError(null);
     addUserMessage(question);
     try {
-      await window.electronAPI.askQuestion(question);
+      await window.electronAPI.askQuestion(question, sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     }
+  };
+
+  const handleClear = async () => {
+    if (isStreaming) return;
+    clearHistory();
+    setError(null);
+    // Also drop the model's memory of the chat, or old turns would keep shaping answers.
+    if (sessionId) await window.electronAPI.clearChat(sessionId).catch(() => {});
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -54,6 +62,13 @@ export function AIChatPanel() {
         <span className="text-xs px-1.5 py-0.5 bg-blue-900 text-blue-300 rounded font-medium">
           {sessionId ? 'Active' : 'Idle'}
         </span>
+        <button
+          onClick={handleClear}
+          disabled={isStreaming || messages.length === 0}
+          className="ml-auto text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-40 transition-colors"
+        >
+          Clear
+        </button>
       </div>
 
       {/* Messages */}

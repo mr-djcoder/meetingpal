@@ -12,7 +12,6 @@ interface AudioDevice {
 interface StartSessionOptions {
   mic_device_index?: number | null;
   loopback_device_index?: number | null;
-  whisper_model?: string;
   duration_limit_seconds?: number | null;
 }
 
@@ -42,6 +41,9 @@ interface UserPreferences {
   onboarding_completed: boolean;
   auto_answer_enabled: boolean;
   auto_answer_prompt: string;
+  chat_provider: 'claude' | 'gemini' | 'ollama';
+  chat_gemini_model: string;
+  chat_ollama_model: string;
   auto_answer_provider: string;
   auto_answer_model: string;
   chat_panel_visible: boolean;
@@ -50,9 +52,23 @@ interface UserPreferences {
   always_on_top: boolean;
   transcript_split: number;
   transcript_visible: boolean;
+  suggested_answer_visible: boolean;
+  compact_mode: boolean;
   transcription_engine: 'local' | 'cloud';
   cloud_provider: string;
   local_transcribe_mode: 'streaming' | 'legacy';
+  suppress_echo: boolean;
+}
+
+interface EngineStatus {
+  engine: string;
+  device: string;
+  model: string;
+  configured_model: string;
+  model_overridden: boolean;
+  mode: string;
+  cloud_provider: string;
+  ready: boolean;
 }
 
 interface AudioLevelFrame {
@@ -81,7 +97,8 @@ interface ElectronAPI {
   getDevices(): Promise<{ devices: AudioDevice[] }>;
   startSession(options: StartSessionOptions): Promise<SessionInfo>;
   stopSession(): Promise<SessionSummary>;
-  askQuestion(question: string, model?: ClaudeModel): Promise<void>;
+  clearChat(sessionId: string): Promise<void>;
+  askQuestion(question: string, sessionId: string, model?: ClaudeModel): Promise<void>;
   getPreferences(): Promise<UserPreferences>;
   setPreferences(partial: Partial<UserPreferences>): Promise<UserPreferences>;
   setApiKey(key: string): Promise<void>;
@@ -89,10 +106,12 @@ interface ElectronAPI {
   setGeminiKey(key: string): Promise<void>;
   hasGeminiKey(): Promise<boolean>;
   getGeminiModels(): Promise<{ models: string[] }>;
+  getOllamaModels(): Promise<{ models: string[] }>;
   setDeepgramKey(key: string): Promise<void>;
   hasDeepgramKey(): Promise<boolean>;
-  getEngineStatus(): Promise<{ engine: string; device: string; model: string; mode: string; cloud_provider: string; ready: boolean }>;
+  getEngineStatus(): Promise<EngineStatus>;
   onTranscriptSegment(cb: (segment: TranscriptSegment) => void): () => void;
+  onTranscriptRemove(cb: (msg: { id: string }) => void): () => void;
   onAudioLevel(cb: (frame: AudioLevelFrame) => void): () => void;
   onAiToken(cb: (token: string) => void): () => void;
   onAiDone(cb: (summary: AiMessageSummary) => void): () => void;
@@ -105,10 +124,15 @@ interface ElectronAPI {
   windowMaximize(): Promise<void>;
   windowClose(): Promise<void>;
   applyTitlebar(custom: boolean): Promise<void>;
+  setWindowWidth(width: number): Promise<void>;
   setOpacity(value: number): Promise<number>;
   setAlwaysOnTop(value: boolean): Promise<boolean>;
+  /** Shrink to the minimum compact strip, or restore the previous size. */
+  setCompact(on: boolean): Promise<void>;
   copyTranscript(sessionId: string): Promise<void>;
   exportTranscript(sessionId: string, format: 'txt' | 'md'): Promise<string | null>;
+  /** Open a folder inside the saved recordings directory in Explorer. Resolves to '' or an error message. */
+  openFolder(folderPath: string): Promise<string>;
 }
 
 declare global {

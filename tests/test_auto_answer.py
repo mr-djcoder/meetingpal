@@ -12,6 +12,19 @@ def test_is_question_positive():
     assert is_question("Tell me about yourself")
     assert is_question("Is that correct?")
     assert is_question("Walk me through your approach.")
+    assert is_question("Describe your approach to technical debt, how do you convince stakeholders.")
+    assert is_question("Okay, so describe a time you disagreed with your manager.")
+    assert is_question("So, how do you handle conflict")
+
+
+def test_should_answer_statements():
+    from backend.auto_answer import should_answer
+    assert should_answer("I'd like to hear about a project that went badly.")
+    assert should_answer("We have a tight deadline and a legacy codebase.")
+    assert not should_answer("Okay, sounds good.")
+    assert not should_answer("Thanks, that makes sense.")
+    assert not should_answer("Right.")
+    assert not should_answer("")
 
 
 def test_is_question_negative():
@@ -198,3 +211,22 @@ def test_new_question_after_interval_cancels_previous():
         await orch.task  # second completes
         assert fresh.calls == 1
     run(body())
+
+
+def test_ollama_provider_needs_no_key():
+    events = []
+    async def bc(e): events.append(e)
+
+    async def body():
+        client = FakeClient()
+        orch = make(bc, now_fn=lambda: 100.0)
+        await orch.maybe_answer(
+            segment=Seg("What is your name?"), prefs=Prefs(provider="ollama"),
+            claude_key=None, gemini_key=None, claude_client=None, gemini_client=None,
+            ollama_client=client, segments=[], history=[],
+        )
+        await orch.task
+        return client
+    client = run(body())
+    assert client.calls == 1
+    assert [e["type"] for e in events][-1] == "auto_answer_done"

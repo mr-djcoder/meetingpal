@@ -8,8 +8,14 @@ interface AudioDevice {
   is_default: boolean;
 }
 
+// Prefer the strongest general model installed; fall back to whatever Ollama has.
+function defaultOllamaModel(installed: string[]): string {
+  return installed.find((m) => m === 'qwen3.5:27b') ?? installed[0] ?? 'qwen3.5:27b';
+}
+
 interface UserPreferences {
   whisper_model: string;
+  suppress_echo: boolean;
   claude_model: string;
   mic_device_index: number | null;
   loopback_device_index: number | null;
@@ -20,6 +26,9 @@ interface UserPreferences {
   onboarding_completed: boolean;
   auto_answer_enabled: boolean;
   auto_answer_prompt: string;
+  chat_provider: 'claude' | 'gemini' | 'ollama';
+  chat_gemini_model: string;
+  chat_ollama_model: string;
   auto_answer_provider: string;
   auto_answer_model: string;
   custom_titlebar: boolean;
@@ -44,6 +53,7 @@ export function Settings({ isOpen, onClose }: Props) {
   const [draft, setDraft] = useState<Partial<UserPreferences>>({});
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [apiKey, setApiKey] = useState('');
+  const [openFolderError, setOpenFolderError] = useState('');
   const [keySaved, setKeySaved] = useState(false);
   const [hasKey, setHasKey] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -51,6 +61,7 @@ export function Settings({ isOpen, onClose }: Props) {
   const [geminiKeySaved, setGeminiKeySaved] = useState(false);
   const [hasGemini, setHasGemini] = useState(false);
   const [geminiModels, setGeminiModels] = useState<string[]>([]);
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
 
   // Transcription engine state
   const isRecording = useTranscriptStore((s) => s.isRecording);
@@ -58,7 +69,9 @@ export function Settings({ isOpen, onClose }: Props) {
   const [dgKeyInput, setDgKeyInput] = useState('');
   const [cloudAck, setCloudAck] = useState(false);
   const [dgKeySaved, setDgKeySaved] = useState(false);
-  const [engineStatus, setEngineStatus] = useState<{ device: string; model: string } | null>(null);
+  const [engineStatus, setEngineStatus] = useState<
+    { device: string; model: string; overridden: boolean } | null
+  >(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -76,10 +89,14 @@ export function Settings({ isOpen, onClose }: Props) {
       .getGeminiModels()
       .then((r) => setGeminiModels(r.models))
       .catch(() => setGeminiModels([]));
+    window.electronAPI
+      .getOllamaModels()
+      .then((r) => setOllamaModels(r.models))
+      .catch(() => setOllamaModels([]));
     window.electronAPI.hasDeepgramKey().then(setHasDgKey).catch(() => setHasDgKey(false));
     window.electronAPI
       .getEngineStatus()
-      .then((s) => setEngineStatus({ device: s.device, model: s.model }))
+      .then((s) => setEngineStatus({ device: s.device, model: s.model, overridden: s.model_overridden }))
       .catch(() => setEngineStatus(null));
   }, [isOpen]);
 
@@ -187,6 +204,23 @@ export function Settings({ isOpen, onClose }: Props) {
                 { value: 'medium.en', label: 'Medium (slower, more accurate)' },
               ]}
             />
+            {engineStatus?.overridden && engineStatus.device.startsWith('GPU') && (
+              <p className="text-xs text-gray-500 mt-2">
+                Your GPU is in use, so the larger {engineStatus.model} model runs instead. This
+                choice applies on CPU.
+              </p>
+            )}
+            <label className="flex items-center gap-2.5 mt-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={merged.suppress_echo}
+                onChange={(e) => update({ suppress_echo: e.target.checked })}
+                className="accent-blue-500"
+              />
+              <span className="text-sm text-gray-300">
+                Hide my mic text when it only repeats the speakers (no headset)
+              </span>
+            </label>
           </Section>
 
           {/* Transcription Engine */}
@@ -278,36 +312,78 @@ export function Settings({ isOpen, onClose }: Props) {
             </div>
           </Section>
 
-          {/* Claude Model */}
+          {/* Chat provider and model */}
           <Section title="AI Model">
-            <RadioGroup
-              value={merged.claude_model}
-              onChange={(v) => update({ claude_model: v })}
-              options={[
-                { value: 'claude-sonnet-4-6', label: 'Claude Sonnet (fast, recommended)' },
-                { value: 'claude-opus-4-6', label: 'Claude Opus (most capable, slower)' },
-              ]}
-            />
+            <div className="mb-3">
+              <label className="text-xs text-gray-400 mb-1 block">Chat provider</label>
+              <select
+                value={merged.chat_provider}
+                onChange={(e) => {
+                  const p = e.target.value as 'claude' | 'gemini' | 'ollama';
+                  update({
+                    chat_provider: p,
+                    ...(p === 'gemini' && !geminiModels.includes(merged.chat_gemini_model)
+                      ? { chat_gemini_model: geminiModels[0] ?? 'gemini-3.5-flash' }
+                      : {}),
+                    ...(p === 'ollama' && !ollamaModels.includes(merged.chat_ollama_model)
+                      ? { chat_ollama_model: defaultOllamaModel(ollamaModels) }
+                      : {}),
+                  });
+                }}
+                className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+              >
+                <option value="claude">Claude (Anthropic)</option>
+                <option value="gemini">Gemini (Google, free tier available)</option>
+                <option value="ollama">Local (Ollama, private, no key)</option>
+              </select>
+            </div>
+            {merged.chat_provider === 'ollama' ? (
+              <div>
+                <select
+                  value={merged.chat_ollama_model}
+                  onChange={(e) => update({ chat_ollama_model: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                >
+                  {(ollamaModels.length ? ollamaModels : [merged.chat_ollama_model]).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                {ollamaModels.length === 0 && (
+                  <p className="text-xs text-red-400 mt-2">
+                    Ollama not reachable at localhost:11434. Start it to see your models.
+                  </p>
+                )}
+              </div>
+            ) : merged.chat_provider === 'gemini' ? (
+              <select
+                value={merged.chat_gemini_model}
+                onChange={(e) => update({ chat_gemini_model: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+              >
+                {(geminiModels.length ? geminiModels : [merged.chat_gemini_model]).map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <RadioGroup
+                value={merged.claude_model}
+                onChange={(v) => update({ claude_model: v })}
+                options={[
+                  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet (fast, recommended)' },
+                  { value: 'claude-opus-4-6', label: 'Claude Opus (most capable, slower)' },
+                ]}
+              />
+            )}
           </Section>
 
           {/* Auto-Answer */}
           <Section title="Auto-Answer (suggested replies)">
+            <p className="text-xs text-gray-400 mb-3">Toggle auto-answer with the ⚡ button in the top bar.</p>
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-300">Enable auto-answer</span>
-                <button
-                  onClick={() => update({ auto_answer_enabled: !merged.auto_answer_enabled })}
-                  className={`relative inline-flex h-5 w-9 rounded-full transition-colors ${
-                    merged.auto_answer_enabled ? 'bg-blue-600' : 'bg-gray-600'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                      merged.auto_answer_enabled ? 'translate-x-4' : 'translate-x-0.5'
-                    }`}
-                  />
-                </button>
-              </div>
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Prompt</label>
                 <textarea
@@ -324,13 +400,18 @@ export function Settings({ isOpen, onClose }: Props) {
                   onChange={(e) => {
                     const p = e.target.value;
                     const model =
-                      p === 'gemini' ? geminiModels[0] ?? 'gemini-3.5-flash' : 'claude-haiku-4-5-20251001';
+                      p === 'ollama'
+                        ? defaultOllamaModel(ollamaModels)
+                        : p === 'gemini'
+                          ? geminiModels[0] ?? 'gemini-3.5-flash'
+                          : 'claude-haiku-4-5-20251001';
                     update({ auto_answer_provider: p, auto_answer_model: model });
                   }}
                   className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
                 >
                   <option value="claude">Claude (Anthropic)</option>
                   <option value="gemini">Gemini (Google)</option>
+                  <option value="ollama">Local (Ollama)</option>
                 </select>
               </div>
               <div>
@@ -340,7 +421,13 @@ export function Settings({ isOpen, onClose }: Props) {
                   onChange={(e) => update({ auto_answer_model: e.target.value })}
                   className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
                 >
-                  {merged.auto_answer_provider === 'gemini'
+                  {merged.auto_answer_provider === 'ollama'
+                    ? (ollamaModels.length ? ollamaModels : [merged.auto_answer_model]).map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))
+                    : merged.auto_answer_provider === 'gemini'
                     ? geminiModels.map((m) => (
                         <option key={m} value={m}>
                           {m}
@@ -353,7 +440,7 @@ export function Settings({ isOpen, onClose }: Props) {
                       ))}
                 </select>
               </div>
-              {merged.auto_answer_provider === 'gemini' && (
+              {(merged.auto_answer_provider === 'gemini' || merged.chat_provider === 'gemini') && (
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">
                     Gemini API Key{' '}
@@ -503,11 +590,26 @@ export function Settings({ isOpen, onClose }: Props) {
               </div>
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Save Location</label>
-                <input
-                  value={merged.save_path}
-                  onChange={(e) => update({ save_path: e.target.value })}
-                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
-                />
+                <div className="flex gap-2">
+                  <input
+                    value={merged.save_path}
+                    onChange={(e) => update({ save_path: e.target.value })}
+                    className="flex-1 min-w-0 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      // Opens the saved location; a path edited here applies after Save.
+                      const err = await window.electronAPI.openFolder(prefs?.save_path ?? merged.save_path);
+                      setOpenFolderError(err);
+                    }}
+                    title="Open the saved location in Windows Explorer"
+                    className="px-3 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-white whitespace-nowrap transition-colors"
+                  >
+                    Open folder
+                  </button>
+                </div>
+                {openFolderError && <p className="text-xs text-red-400 mt-1">{openFolderError}</p>}
               </div>
             </div>
           </Section>

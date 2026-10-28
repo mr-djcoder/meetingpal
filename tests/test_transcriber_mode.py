@@ -72,3 +72,29 @@ def test_gpu_load_failure_falls_back_to_cpu(monkeypatch):
     assert t.device == "cpu"
     assert t.active_model == "small.en"
     assert t.model_loaded is True
+
+
+def test_backlog_is_bounded_and_reported():
+    import numpy as np
+    errors = []
+    t = WhisperTranscriber(model_name="base.en", error_callback=errors.append)
+    frame = np.zeros(8000, dtype=np.float32)
+    for _ in range(tr.MAX_BACKLOG_FRAMES + 25):
+        t.enqueue("mic", frame, 0.0)
+    assert t._queue.qsize() <= tr.MAX_BACKLOG_FRAMES
+    assert t._dropped_frames == 25
+    assert len(errors) == 1  # throttled, not one message per dropped frame
+
+
+def test_transcribe_failure_is_reported_not_silent():
+    import numpy as np
+    errors = []
+    t = WhisperTranscriber(model_name="base.en", error_callback=errors.append)
+
+    class Boom:
+        def transcribe(self, *a, **k):
+            raise RuntimeError("CUDA out of memory")
+
+    t._model = Boom()
+    assert t.transcribe(np.zeros(8000, dtype=np.float32), beam_size=1) == ""
+    assert errors and "out of memory" in errors[0]

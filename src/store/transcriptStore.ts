@@ -28,7 +28,9 @@ interface TranscriptStore {
   startSession: (id: string) => void;
   stopSession: () => void;
   addSegment: (segment: TranscriptSegment) => void;
+  removeSegment: (id: string) => void;
   clearSession: () => void;
+  clearSegments: () => void;
   startInlineAnswer: () => void;
   appendInlineToken: (text: string) => void;
   finishInlineAnswer: () => void;
@@ -61,10 +63,18 @@ export const useTranscriptStore = create<TranscriptStore>((set, get) => ({
       if (idx === -1) {
         return { segments: [...state.segments, segment] };
       }
+      // Updates can arrive out of order; a stale partial must never overwrite a final.
+      if (state.segments[idx].is_final && !segment.is_final) return {};
       const next = state.segments.slice();
       next[idx] = segment;
       return { segments: next };
     }),
+
+  removeSegment: (id: string) =>
+    set((state) => ({ segments: state.segments.filter((s) => s.id !== id) })),
+
+  // Empty the on-screen transcript but keep the session running (the saved transcript is unaffected).
+  clearSegments: () => set({ segments: [], inlineAnswers: {}, inlineAnchor: null }),
 
   clearSession: () =>
     set({

@@ -5,7 +5,7 @@ import { useAutoAnswerStore } from '../store/autoAnswerStore';
  * rendered literally as `AI: <response>`.
  */
 export function SuggestedAnswerPanel() {
-  const { question, answer, streaming, error } = useAutoAnswerStore();
+  const { question, answer, streaming, error, clear } = useAutoAnswerStore();
 
   const empty = !question && !answer && !error;
 
@@ -15,6 +15,14 @@ export function SuggestedAnswerPanel() {
         <span className="w-2 h-2 rounded-full bg-blue-400" />
         <span className="text-xs font-semibold text-blue-300">Suggested Answer</span>
         {streaming && <span className="text-xs text-gray-500">streaming…</span>}
+        {!empty && !streaming && (
+          <button
+            onClick={clear}
+            className="ml-auto text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {empty && (

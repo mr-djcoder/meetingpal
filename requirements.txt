@@ -1,5 +1,13 @@
-# Python 3.13. torch/torchaudio resolve to CPU wheels on Windows PyPI.
-# Versions reflect the working installed set (the old 3.11-era pins had no 3.13 wheels).
+# Python 3.12 package set.
+#
+# GPU/CUDA install (recommended for RTX GPU users):
+#   pip install torch==2.11.0 torchaudio==2.11.0 \
+#       --index-url https://download.pytorch.org/whl/cu128 --force-reinstall
+# CPU fallback (default, no GPU):
+#   pip install -r requirements.txt   (installs torch+cpu from PyPI)
+#
+# ctranslate2 (faster-whisper backend) bundles CUDA DLLs on Windows and
+# auto-selects GPU when torch.cuda.is_available() — no separate install needed.
 pyaudiowpatch==0.2.12.8
 faster-whisper==1.2.1
 silero-vad==6.2.1
@@ -16,3 +24,4 @@ google-genai==2.8.0
 deepgram-sdk==3.7.7 ; python_version >= "3.11"
 websockets==13.1  # deepgram-sdk 3.7.x requires websockets<14; downgraded from 16.0
 pytest==8.2.0
+httpx==0.28.1

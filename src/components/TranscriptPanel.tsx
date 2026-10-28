@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranscriptStore } from '../store/transcriptStore';
 
-export function TranscriptPanel() {
-  const { segments, sessionId, isRecording, inlineAnswers } = useTranscriptStore();
+interface Props {
+  headerVisible?: boolean;
+}
+
+export function TranscriptPanel({ headerVisible = true }: Props) {
+  const { segments, sessionId, isRecording, inlineAnswers, clearSegments } = useTranscriptStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [userScrolled, setUserScrolled] = useState(false);
@@ -38,44 +42,54 @@ export function TranscriptPanel() {
 
   return (
     <div className="flex flex-col h-full bg-gray-900">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700">
-        <span className="text-sm font-medium text-gray-300">Transcript</span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleCopy}
-            disabled={!sessionId}
-            className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-40 transition-colors"
-          >
-            {copied ? 'Copied!' : 'Copy'}
-          </button>
-          <div className="relative">
+      {/* Header — Transcript label + Copy/Export; hidden when user toggles the bar off */}
+      {headerVisible && (
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700">
+          <span className="text-sm font-medium text-gray-300">Transcript</span>
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setExportOpen((v) => !v)}
+              onClick={clearSegments}
+              disabled={segments.length === 0}
+              title="Clear the transcript view (the saved transcript keeps everything)"
+              className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-40 transition-colors"
+            >
+              Clear
+            </button>
+            <button
+              onClick={handleCopy}
               disabled={!sessionId}
               className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-40 transition-colors"
             >
-              Export
+              {copied ? 'Copied!' : 'Copy'}
             </button>
-            {exportOpen && (
-              <div className="absolute right-0 top-7 bg-gray-800 border border-gray-600 rounded shadow-lg z-10">
-                <button
-                  onClick={() => handleExport('md')}
-                  className="block w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-700"
-                >
-                  Markdown (.md)
-                </button>
-                <button
-                  onClick={() => handleExport('txt')}
-                  className="block w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-700"
-                >
-                  Plain text (.txt)
-                </button>
-              </div>
-            )}
+            <div className="relative">
+              <button
+                onClick={() => setExportOpen((v) => !v)}
+                disabled={!sessionId}
+                className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-40 transition-colors"
+              >
+                Export
+              </button>
+              {exportOpen && (
+                <div className="absolute right-0 top-7 bg-gray-800 border border-gray-600 rounded shadow-lg z-10">
+                  <button
+                    onClick={() => handleExport('md')}
+                    className="block w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-700"
+                  >
+                    Markdown (.md)
+                  </button>
+                  <button
+                    onClick={() => handleExport('txt')}
+                    className="block w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-700"
+                  >
+                    Plain text (.txt)
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Segments */}
       <div
@@ -99,28 +113,30 @@ export function TranscriptPanel() {
           const isYou = seg.speaker === 'You';
           const inline = inlineAnswers[seg.id];
           return (
-            <div key={seg.id} className="space-y-1">
-              <div className="flex gap-2 items-start transcript-font">
+            <div key={seg.id} className="space-y-0.5 transcript-font">
+              {/* Speaker + timestamp on their own line */}
+              <div className="flex gap-2 items-center">
                 <span
-                  className={`mt-0.5 flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded ${
-                    isYou
-                      ? 'bg-blue-900 text-blue-300'
-                      : 'bg-gray-700 text-gray-300'
+                  className={`flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded ${
+                    isYou ? 'bg-blue-900 text-blue-300' : 'bg-gray-700 text-gray-300'
                   }`}
                 >
                   {seg.speaker}
                 </span>
-                <span className="text-xs text-gray-500 flex-shrink-0 mt-0.5">{time}</span>
-                <p className={`text-gray-100 leading-relaxed${seg.is_final ? '' : ' italic text-gray-400'}`}>
-                  {seg.text}
-                </p>
+                <span className="text-xs text-gray-500">{time}</span>
               </div>
+              {/* Transcript text on the next line, indented */}
+              <p className={`pl-1 leading-relaxed${seg.is_final ? ' text-gray-100' : ' italic text-gray-400'}`}>
+                {seg.text}
+              </p>
               {inline && (
-                <div className="flex gap-2 items-start transcript-font pl-1">
-                  <span className="mt-0.5 flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded bg-emerald-900 text-emerald-300">
-                    AI
-                  </span>
-                  <p className="text-emerald-100 leading-relaxed">
+                <div className="space-y-0.5 pl-1 mt-1">
+                  <div className="flex gap-2 items-center">
+                    <span className="flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded bg-emerald-900 text-emerald-300">
+                      AI
+                    </span>
+                  </div>
+                  <p className="pl-1 text-emerald-100 leading-relaxed">
                     {inline.text}
                     {inline.streaming && (
                       <span className="inline-block w-1.5 h-4 ml-0.5 bg-emerald-400 animate-pulse align-text-bottom" />
