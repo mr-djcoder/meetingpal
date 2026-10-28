@@ -53,6 +53,7 @@ export function Settings({ isOpen, onClose }: Props) {
   const [draft, setDraft] = useState<Partial<UserPreferences>>({});
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [apiKey, setApiKey] = useState('');
+  const [openFolderError, setOpenFolderError] = useState('');
   const [keySaved, setKeySaved] = useState(false);
   const [hasKey, setHasKey] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -589,11 +590,26 @@ export function Settings({ isOpen, onClose }: Props) {
               </div>
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Save Location</label>
-                <input
-                  value={merged.save_path}
-                  onChange={(e) => update({ save_path: e.target.value })}
-                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
-                />
+                <div className="flex gap-2">
+                  <input
+                    value={merged.save_path}
+                    onChange={(e) => update({ save_path: e.target.value })}
+                    className="flex-1 min-w-0 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      // Opens the saved location; a path edited here applies after Save.
+                      const err = await window.electronAPI.openFolder(prefs?.save_path ?? merged.save_path);
+                      setOpenFolderError(err);
+                    }}
+                    title="Open the saved location in Windows Explorer"
+                    className="px-3 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-white whitespace-nowrap transition-colors"
+                  >
+                    Open folder
+                  </button>
+                </div>
+                {openFolderError && <p className="text-xs text-red-400 mt-1">{openFolderError}</p>}
               </div>
             </div>
           </Section>

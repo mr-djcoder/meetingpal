@@ -97,4 +97,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   copyTranscript: (sessionId: string) => ipcRenderer.invoke('copy-transcript', sessionId),
   exportTranscript: (sessionId: string, format: string) =>
     ipcRenderer.invoke('export-transcript', { sessionId, format }),
+  openFolder: (folderPath: string) => ipcRenderer.invoke('open-folder', folderPath),
 });

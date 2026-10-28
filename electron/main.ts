@@ -356,6 +356,8 @@ ipcMain.handle('open-folder', async (_e, folderPath: string) => {
   const root = path.resolve(save_path);
   const target = path.resolve(String(folderPath));
   if (target !== root && !target.startsWith(root + path.sep)) return 'Path outside recordings folder';
+  // The root may not exist until the first session is saved.
+  if (target === root) require('fs').mkdirSync(root, { recursive: true });
   return shell.openPath(target);
 });
 

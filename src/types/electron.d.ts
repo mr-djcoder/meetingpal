@@ -128,6 +128,8 @@ interface ElectronAPI {
   setAlwaysOnTop(value: boolean): Promise<boolean>;
   copyTranscript(sessionId: string): Promise<void>;
   exportTranscript(sessionId: string, format: 'txt' | 'md'): Promise<string | null>;
+  /** Open a folder inside the saved recordings directory in Explorer. Resolves to '' or an error message. */
+  openFolder(folderPath: string): Promise<string>;
 }
 
 declare global {
