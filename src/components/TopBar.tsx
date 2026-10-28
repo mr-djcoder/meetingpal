@@ -161,21 +161,8 @@ export function TopBar({
         )}
       </div>
 
-      {/* Right controls */}
+      {/* Right controls: pin and answer box (usually off) first, then auto-answer, compact, transcript and chat (usually on) */}
       <div className="flex items-center gap-2 flex-shrink-0">
-        {/* Compact mode: fixed 400x800 window, maximize disabled */}
-        <button
-          onClick={onToggleCompact}
-          title={compact ? 'Leave compact mode' : 'Compact mode (400 x 800, no maximize)'}
-          className={`p-1.5 rounded transition-colors ${
-            compact ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'
-          }`}
-        >
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
-          </svg>
-        </button>
-
         {/* Always-on-top pin */}
         <button
           onClick={togglePin}
@@ -187,6 +174,25 @@ export function TopBar({
           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4h6l-1 6 3 3v2h-5v5l-1 1-1-1v-5H4v-2l3-3-1-6z" />
           </svg>
+        </button>
+
+        {/* Show or hide the Suggested Answer box (answers are not written to it while hidden) */}
+        <button
+          onClick={onToggleSuggested}
+          title={suggestedVisible ? 'Hide suggested answer box' : 'Show suggested answer box'}
+          className={
+            narrow
+              ? `p-1.5 rounded transition-colors ${suggestedVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+              : `text-xs px-2 py-1 rounded font-medium transition-colors ${suggestedVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
+          }
+        >
+          {narrow ? (
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5h16v14H4zM4 14h16" />
+            </svg>
+          ) : (
+            'Answer box'
+          )}
         </button>
 
         {/* Auto-answer toggle */}
@@ -208,23 +214,17 @@ export function TopBar({
           )}
         </button>
 
-        {/* Show or hide the Suggested Answer box (answers are not written to it while hidden) */}
+        {/* Compact mode: fixed 400x800 window, maximize disabled */}
         <button
-          onClick={onToggleSuggested}
-          title={suggestedVisible ? 'Hide suggested answer box' : 'Show suggested answer box'}
-          className={
-            narrow
-              ? `p-1.5 rounded transition-colors ${suggestedVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
-              : `text-xs px-2 py-1 rounded font-medium transition-colors ${suggestedVisible ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`
-          }
+          onClick={onToggleCompact}
+          title={compact ? 'Leave compact mode' : 'Compact mode (400 x 800, no maximize)'}
+          className={`p-1.5 rounded transition-colors ${
+            compact ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'
+          }`}
         >
-          {narrow ? (
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5h16v14H4zM4 14h16" />
-            </svg>
-          ) : (
-            'Answer box'
-          )}
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+          </svg>
         </button>
 
         {/* Toggle transcript header bar (Transcript label + Copy/Export) */}
