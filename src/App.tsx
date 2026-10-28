@@ -23,6 +23,7 @@ function MainLayout() {
   const [chatVisible, setChatVisible] = useState(true);
   const [suggestedVisible, setSuggestedVisible] = useState(true);
   const [compact, setCompact] = useState(false);
+  const compactApplied = useRef(false); // the saved mode is applied once, not on every settings close
   const [transcriptVisible, setTranscriptVisible] = useState(true);
   // Separate from transcriptVisible: only hides the header bar (Transcript + Copy/Export),
   // not the transcript content.
@@ -61,6 +62,12 @@ function MainLayout() {
       const showBox = p.suggested_answer_visible !== false;
       setSuggestedVisible(showBox);
       useAutoAnswerStore.getState().setPanelVisible(showBox);
+      if (!compactApplied.current) {
+        compactApplied.current = true;
+        const startCompact = p.compact_mode !== false;
+        setCompact(startCompact);
+        if (startCompact) window.electronAPI.setCompact(true);
+      }
       setChatVisible(p.chat_panel_visible ?? true);
       setTranscriptVisible(p.transcript_visible !== false);
       setCustomTitlebar(Boolean(p.custom_titlebar));
@@ -101,6 +108,7 @@ function MainLayout() {
     const next = !compact;
     setCompact(next);
     window.electronAPI.setCompact(next);
+    window.electronAPI.setPreferences({ compact_mode: next });
   };
 
   const toggleAutoAnswer = () => {

@@ -52,6 +52,7 @@ class UserPreferences:
     transcript_split: float = 60.0  # % width of the transcript panel
     transcript_visible: bool = False
     suggested_answer_visible: bool = True  # show the Suggested Answer box
+    compact_mode: bool = True  # start in the fixed 400x800 compact window
     suppress_echo: bool = True  # drop mic text that duplicates the other side (speakers, no headset)
 
 
