@@ -35,6 +35,7 @@ interface UserPreferences {
   transcription_engine: 'local' | 'cloud';
   cloud_provider: string;
   local_transcribe_mode: 'streaming' | 'legacy';
+  screen_capture_protection?: boolean;
 }
 
 const CLAUDE_MODELS = [
@@ -99,6 +100,14 @@ export function Settings({ isOpen, onClose }: Props) {
       .then((s) => setEngineStatus({ device: s.device, model: s.model, overridden: s.model_overridden }))
       .catch(() => setEngineStatus(null));
   }, [isOpen]);
+
+  // Sync initial or updated screen capture protection state to electron window
+  useEffect(() => {
+    if (prefs) {
+      const hide = prefs.screen_capture_protection ?? true;
+      window.electronAPI?.setScreenCaptureProtection?.(hide);
+    }
+  }, [prefs?.screen_capture_protection]);
 
   if (!isOpen || !prefs) return null;
 
@@ -190,6 +199,34 @@ export function Settings({ isOpen, onClose }: Props) {
               >
                 {keySaved ? 'Saved!' : 'Update'}
               </button>
+            </div>
+          </Section>
+
+          {/* Screen Sharing Visibility */}
+          <Section title="Privacy & Screen Sharing">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm text-gray-300 block">Hide app during screen sharing</span>
+                  <span className="text-xs text-gray-500">Makes app invisible to Teams, Zoom, and Chime</span>
+                </div>
+                <button
+                  onClick={() => {
+                    const current = merged.screen_capture_protection ?? true;
+                    update({ screen_capture_protection: !current });
+                    window.electronAPI?.setScreenCaptureProtection?.(!current);
+                  }}
+                  className={`relative inline-flex h-5 w-9 rounded-full transition-colors ${
+                    (merged.screen_capture_protection ?? true) ? 'bg-blue-600' : 'bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                      (merged.screen_capture_protection ?? true) ? 'translate-x-4' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </Section>
 
