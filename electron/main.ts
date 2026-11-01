@@ -29,6 +29,7 @@ function createWindow(customTitlebar: boolean): void {
     backgroundColor: '#111827',
     frame: !customTitlebar,
     resizable: true,
+    contentProtection: true, // Default to invisible during screen share
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -295,6 +296,15 @@ ipcMain.handle('has-deepgram-key', async () => {
 });
 
 ipcMain.handle('get-engine-status', () => apiRequest('GET', '/api/engine/status'));
+
+// Screen-sharing invisibility protection toggle
+ipcMain.handle('set-screen-capture-protection', (_e, hide: boolean) => {
+  if (mainWindow) {
+    mainWindow.setContentProtection(Boolean(hide));
+    return true;
+  }
+  return false;
+});
 
 ipcMain.handle('copy-transcript', async (_e, sessionId: string) => {
   const data = await apiRequest<{ segments: Array<{ speaker: string; wall_clock_time: string; text: string }> }>(
