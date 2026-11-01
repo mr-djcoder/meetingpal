@@ -286,6 +286,7 @@ class PrefsUpdate(BaseModel):
     cloud_provider: Literal["deepgram"] | None = None
     local_transcribe_mode: Literal["streaming", "legacy"] | None = None
     suppress_echo: bool | None = None
+    screen_capture_protection: bool | None = None
 
     @field_validator("save_path")
     @classmethod

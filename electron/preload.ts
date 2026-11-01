@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Engine status readout
   getEngineStatus: () => ipcRenderer.invoke('get-engine-status'),
 
+  // Screen-share invisibility
+  setScreenCaptureProtection: (hide: boolean) =>
+    ipcRenderer.invoke('set-screen-capture-protection', hide),
+
   // Real-time listeners — each returns a cleanup function
   onTranscriptSegment: (cb: (segment: unknown) => void) => {
     const handler = (_: Electron.IpcRendererEvent, segment: unknown) => cb(segment);

@@ -15,6 +15,10 @@ let quitting = false;
 
 // ── Window ────────────────────────────────────────────────────────────────────
 
+// Hidden from screen sharing unless the user turns it off in Settings. Kept at
+// module level so a window recreated by apply-titlebar keeps the choice.
+let contentProtection = true;
+
 function createWindow(customTitlebar: boolean): void {
   // `frame` is fixed at creation; when the custom title bar is on we drop the OS
   // frame + menu and the renderer draws its own bar. Window stays resizable.
@@ -29,7 +33,7 @@ function createWindow(customTitlebar: boolean): void {
     backgroundColor: '#111827',
     frame: !customTitlebar,
     resizable: true,
-    contentProtection: true, // Default to invisible during screen share
+    contentProtection,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -299,8 +303,9 @@ ipcMain.handle('get-engine-status', () => apiRequest('GET', '/api/engine/status'
 
 // Screen-sharing invisibility protection toggle
 ipcMain.handle('set-screen-capture-protection', (_e, hide: boolean) => {
+  contentProtection = Boolean(hide);
   if (mainWindow) {
-    mainWindow.setContentProtection(Boolean(hide));
+    mainWindow.setContentProtection(contentProtection);
     return true;
   }
   return false;
@@ -463,8 +468,12 @@ app.on('ready', async () => {
     await syncKeysToSidecar();
     let customTitlebar = false;
     try {
-      const prefs = await apiRequest<{ custom_titlebar?: boolean }>('GET', '/api/preferences');
+      const prefs = await apiRequest<{ custom_titlebar?: boolean; screen_capture_protection?: boolean }>(
+        'GET',
+        '/api/preferences',
+      );
       customTitlebar = Boolean(prefs.custom_titlebar);
+      contentProtection = prefs.screen_capture_protection ?? true;
     } catch {
       // fall back to the standard OS frame
     }
