@@ -54,6 +54,7 @@ interface UserPreferences {
   transcript_visible: boolean;
   suggested_answer_visible: boolean;
   compact_mode: boolean;
+  screen_capture_protection: boolean;
   transcription_engine: 'local' | 'cloud';
   cloud_provider: string;
   local_transcribe_mode: 'streaming' | 'legacy';
@@ -110,6 +111,7 @@ interface ElectronAPI {
   setDeepgramKey(key: string): Promise<void>;
   hasDeepgramKey(): Promise<boolean>;
   getEngineStatus(): Promise<EngineStatus>;
+  setScreenCaptureProtection(hide: boolean): Promise<boolean>;
   onTranscriptSegment(cb: (segment: TranscriptSegment) => void): () => void;
   onTranscriptRemove(cb: (msg: { id: string }) => void): () => void;
   onAudioLevel(cb: (frame: AudioLevelFrame) => void): () => void;

@@ -53,6 +53,7 @@ class UserPreferences:
     transcript_visible: bool = False
     suggested_answer_visible: bool = True  # show the Suggested Answer box
     compact_mode: bool = True  # start in the fixed 400x800 compact window
+    screen_capture_protection: bool = True  # hide the window from screen sharing
     suppress_echo: bool = True  # drop mic text that duplicates the other side (speakers, no headset)
 
 
